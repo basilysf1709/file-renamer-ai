@@ -10,6 +10,10 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import httpx
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # ---- Config ----
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
