@@ -29,16 +29,24 @@ app.add_middleware(
 )
 
 # ---- Models ----
+class SearchReq(BaseModel):
+    access_token: str
+    search_query: str
+    include_shared: bool = True
+    max_results: int = 100
+
 class ListReq(BaseModel):
     access_token: str
     folder_id: str
     include_shared: bool = True
+    recursive: bool = False
 
 class FileInfo(BaseModel):
     id: str
     name: str
     mimeType: str
     createdTime: Optional[str] = None
+    parents: Optional[List[str]] = None
 
 class SuggestReq(BaseModel):
     access_token: str
@@ -92,7 +100,6 @@ async def gemini_name_for_image(img_bytes: bytes, created_time: str, orig_name: 
     )
 
     # Minimal Gemini (REST) call to gemini-1.5-flash with inline image
-    # Note: Can swap to official SDK; keeping REST avoids extra deps.
     url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
     headers = {"Content-Type": "application/json"}
     payload = {
@@ -126,22 +133,91 @@ async def drive_download_image(service, file_id: str) -> bytes:
         status, done = downloader.next_chunk()
     return buf.getvalue()
 
+def get_all_folders_recursive(service, folder_id: str, include_shared: bool = True) -> List[str]:
+    """Recursively get all folder IDs starting from a root folder"""
+    all_folders = [folder_id]
+    folders_to_process = [folder_id]
+    
+    while folders_to_process:
+        current_folder = folders_to_process.pop(0)
+        try:
+            q = f"'{current_folder}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+            resp = service.files().list(
+                q=q,
+                fields="files(id,name)",
+                includeItemsFromAllDrives=include_shared,
+                supportsAllDrives=include_shared
+            ).execute()
+            
+            subfolders = resp.get('files', [])
+            for folder in subfolders:
+                folder_id = folder['id']
+                if folder_id not in all_folders:
+                    all_folders.append(folder_id)
+                    folders_to_process.append(folder_id)
+        except HttpError as e:
+            logger.warning(f"Error accessing folder {current_folder}: {e}")
+            continue
+    
+    return all_folders
+
 # ---- Routes ----
 @app.get("/health")
 def health():
     return {"ok": True}
 
-@app.post("/list_images")
-def list_images(req: ListReq):
+@app.post("/search_images")
+def search_images(req: SearchReq):
+    """Search for images across Google Drive using a search query"""
     try:
         svc = drive_client(req.access_token)
-        q = f"'{req.folder_id}' in parents and mimeType contains 'image/' and trashed = false"
+        
+        # Build search query for images
+        q = f"mimeType contains 'image/' and trashed = false"
+        if req.search_query.strip():
+            q += f" and (name contains '{req.search_query}' or fullText contains '{req.search_query}')"
+        
+        files = []
+        pageToken = None
+        while len(files) < req.max_results:
+            resp = svc.files().list(
+                q=q,
+                fields="nextPageToken, files(id,name,mimeType,createdTime,parents)",
+                includeItemsFromAllDrives=req.include_shared,
+                supportsAllDrives=req.include_shared,
+                pageToken=pageToken,
+                pageSize=min(100, req.max_results - len(files))
+            ).execute()
+            
+            files.extend(resp.get('files', []))
+            pageToken = resp.get('nextPageToken')
+            if not pageToken or len(files) >= req.max_results:
+                break
+        
+        return {"files": files[:req.max_results], "total_found": len(files)}
+    except HttpError as e:
+        raise HTTPException(status_code=e.resp.status, detail=str(e))
+
+@app.post("/list_images")
+def list_images(req: ListReq):
+    """List images in a specific folder, optionally recursively"""
+    try:
+        svc = drive_client(req.access_token)
+        
+        if req.recursive:
+            # Get all folders recursively
+            all_folders = get_all_folders_recursive(svc, req.folder_id, req.include_shared)
+            folder_query = " or ".join([f"'{folder_id}' in parents" for folder_id in all_folders])
+            q = f"({folder_query}) and mimeType contains 'image/' and trashed = false"
+        else:
+            q = f"'{req.folder_id}' in parents and mimeType contains 'image/' and trashed = false"
+        
         files = []
         pageToken = None
         while True:
             resp = svc.files().list(
                 q=q,
-                fields="nextPageToken, files(id,name,mimeType,createdTime)",
+                fields="nextPageToken, files(id,name,mimeType,createdTime,parents)",
                 includeItemsFromAllDrives=req.include_shared,
                 supportsAllDrives=req.include_shared,
                 pageToken=pageToken
@@ -150,12 +226,14 @@ def list_images(req: ListReq):
             pageToken = resp.get('nextPageToken')
             if not pageToken:
                 break
+        
         return {"files": files}
     except HttpError as e:
         raise HTTPException(status_code=e.resp.status, detail=str(e))
 
 @app.post("/suggest_names")
 async def suggest_names(req: SuggestReq):
+    """Generate AI suggestions for image names"""
     svc = drive_client(req.access_token)
     out = []
     for f in req.files:
@@ -170,6 +248,7 @@ async def suggest_names(req: SuggestReq):
 
 @app.post("/rename")
 def rename(req: RenameReq):
+    """Bulk rename files"""
     svc = drive_client(req.access_token)
     results = []
     for it in req.items:
