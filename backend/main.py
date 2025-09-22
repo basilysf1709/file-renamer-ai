@@ -16,6 +16,7 @@ from fastapi import Query, Request
 from pillow_heif import register_heif_opener
 from database import db
 import json
+import stripe
 
 # Register HEIF/HEIC opener for Pillow
 register_heif_opener()
@@ -27,6 +28,8 @@ load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 THUMBNAIL_MAX_SIDE = int(os.getenv("THUMBNAIL_MAX_SIDE", "1024"))
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000,https://renamedriveimages.work").split(',')
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
 app = FastAPI()
 app.add_middleware(
@@ -120,6 +123,15 @@ class ZipReq(BaseModel):
 async def get_user_email_from_token(access_token: str) -> str:
     """Get user email from Google access token"""
     try:
+        # Try to get email from Drive API first (using the available scope)
+        svc = drive_client(access_token)
+        about = svc.about().get(fields="user").execute()
+        email = about.get("user", {}).get("emailAddress")
+        if email:
+            logger.info(f"Got user email from Drive API: {email}")
+            return email
+        
+        # Fallback to userinfo endpoint
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 "https://www.googleapis.com/oauth2/v2/userinfo",
@@ -127,9 +139,11 @@ async def get_user_email_from_token(access_token: str) -> str:
             )
             if response.status_code == 200:
                 user_info = response.json()
-                return user_info.get("email")
+                email = user_info.get("email")
+                logger.info(f"Got user email from userinfo API: {email}")
+                return email
             else:
-                logger.error(f"Failed to get user info: {response.status_code}")
+                logger.error(f"Failed to get user info: {response.status_code} - {response.text}")
                 return None
     except Exception as e:
         logger.error(f"Error getting user email: {e}")
@@ -288,6 +302,21 @@ async def get_user_credits(access_token: str = Body(..., embed=True)):
     user = await db.get_or_create_user(email, token_hash)
     
     return {"credits": user["credits"], "email": email}
+
+@app.post("/add_credits")
+async def add_credits_manual(access_token: str = Body(...), credits: int = Body(...)):
+    """Manually add credits to user account (temporary solution until Stripe webhook is configured)"""
+    email = await get_user_email_from_token(access_token)
+    if not email:
+        raise HTTPException(status_code=401, detail="Invalid access token")
+    
+    success = await db.add_credits(email, credits, None, f"Manual credit addition: {credits} credits")
+    if success:
+        updated_credits = await db.get_user_credits(email)
+        logger.info(f"Manually added {credits} credits to {email}. New balance: {updated_credits}")
+        return {"success": True, "credits_added": credits, "new_balance": updated_credits}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to add credits")
 
 @app.post("/search_images")
 def search_images(req: SearchReq):
@@ -464,3 +493,71 @@ def download_zip(req: ZipReq):
     except HttpError as e:
         logger.error(f"download_zip failed: {e}")
         raise HTTPException(status_code=e.resp.status, detail=str(e))
+
+@app.post("/stripe-webhook")
+async def stripe_webhook(request: Request):
+    """Handle Stripe webhook events for payment completion"""
+    try:
+        body = await request.body()
+        sig_header = request.headers.get('stripe-signature')
+        
+        if not STRIPE_WEBHOOK_SECRET:
+            logger.error("Stripe webhook secret not configured")
+            raise HTTPException(status_code=500, detail="Webhook secret not configured")
+        
+        # Verify webhook signature
+        try:
+            event = stripe.Webhook.construct_event(
+                body, sig_header, STRIPE_WEBHOOK_SECRET
+            )
+        except ValueError as e:
+            logger.error(f"Invalid payload: {e}")
+            raise HTTPException(status_code=400, detail="Invalid payload")
+        except stripe.error.SignatureVerificationError as e:
+            logger.error(f"Invalid signature: {e}")
+            raise HTTPException(status_code=400, detail="Invalid signature")
+        
+        # Handle the event
+        if event['type'] == 'checkout.session.completed':
+            session = event['data']['object']
+            
+            # Get customer email and payment amount
+            customer_email = session.get('customer_details', {}).get('email')
+            amount_total = session.get('amount_total', 0)  # Amount in cents
+            payment_intent_id = session.get('payment_intent')
+            
+            logger.info(f"Payment completed: email={customer_email}, amount={amount_total}, payment_id={payment_intent_id}")
+            
+            if customer_email and amount_total:
+                # Determine credits based on amount
+                credits_to_add = 0
+                if amount_total == 1300:  # $13.00 in cents
+                    credits_to_add = 100
+                elif amount_total == 9900:  # $99.00 in cents
+                    credits_to_add = 1000
+                else:
+                    logger.warning(f"Unknown payment amount: {amount_total} cents")
+                
+                if credits_to_add > 0:
+                    # Add credits to user account
+                    success = await db.add_credits(
+                        customer_email, 
+                        credits_to_add, 
+                        payment_intent_id,
+                        f"Stripe payment: {credits_to_add} credits for ${amount_total/100:.2f}"
+                    )
+                    
+                    if success:
+                        logger.info(f"Successfully added {credits_to_add} credits to {customer_email}")
+                    else:
+                        logger.error(f"Failed to add credits to {customer_email}")
+                        # Note: We still return 200 to Stripe to avoid retries
+            
+        else:
+            logger.info(f"Unhandled event type: {event['type']}")
+        
+        return {"status": "success"}
+        
+    except Exception as e:
+        logger.error(f"Stripe webhook error: {e}")
+        raise HTTPException(status_code=500, detail="Webhook processing failed")

@@ -66,6 +66,19 @@ export default function Page() {
   useEffect(() => {
     if (accessToken) {
       fetchUserCredits()
+      
+      // Check if user returned from Stripe payment
+      const pendingCredits = localStorage.getItem('pendingCredits')
+      if (pendingCredits) {
+        const credits = parseInt(pendingCredits)
+        localStorage.removeItem('pendingCredits')
+        
+        // Show a prompt to confirm credit addition
+        const confirmed = confirm(`Did you complete the payment for ${credits} credits? Click OK to add them to your account.`)
+        if (confirmed) {
+          addCreditsManually(credits)
+        }
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken])
@@ -140,7 +153,29 @@ export default function Page() {
     const stripeUrl = amount === 100 
       ? 'https://buy.stripe.com/9B628r4Tz8Sd6Ci1me6oo03'
       : 'https://buy.stripe.com/fZudR93Pv8Sd7Gmfd46oo04'
+    
+    // Store the purchase info for when user returns
+    localStorage.setItem('pendingCredits', amount.toString())
     window.open(stripeUrl, '_blank')
+  }
+
+  async function addCreditsManually(credits: number) {
+    if (!accessToken) return
+    try {
+      const r = await fetch(`${BACKEND}/add_credits`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ access_token: accessToken, credits })
+      })
+      if (r.ok) {
+        const data = await r.json()
+        fetchUserCredits() // Refresh credits display
+        setError(`Successfully added ${credits} credits! New balance: ${data.new_balance}`)
+        // Clear the error after 3 seconds
+        setTimeout(() => setError(null), 3000)
+      }
+    } catch (e:any) {
+      console.error('Failed to add credits:', e)
+    }
   }
 
   async function fetchUserCredits() {
