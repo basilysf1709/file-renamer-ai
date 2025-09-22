@@ -14,6 +14,8 @@ from dotenv import load_dotenv
 from fastapi.responses import StreamingResponse
 from fastapi import Query, Request
 from pillow_heif import register_heif_opener
+from database import db
+import json
 
 # Register HEIF/HEIC opener for Pillow
 register_heif_opener()
@@ -34,6 +36,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+@app.on_event("startup")
+async def startup_event():
+    await db.connect()
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await db.disconnect()
 
 # ---- Startup logs ----
 key_fingerprint = None
@@ -106,6 +116,24 @@ class ZipReq(BaseModel):
     items: List[ZipItem]
 
 # ---- Utils ----
+
+async def get_user_email_from_token(access_token: str) -> str:
+    """Get user email from Google access token"""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                "https://www.googleapis.com/oauth2/v2/userinfo",
+                headers={"Authorization": f"Bearer {access_token}"}
+            )
+            if response.status_code == 200:
+                user_info = response.json()
+                return user_info.get("email")
+            else:
+                logger.error(f"Failed to get user info: {response.status_code}")
+                return None
+    except Exception as e:
+        logger.error(f"Error getting user email: {e}")
+        return None
 
 def drive_client(access_token: str):
     from datetime import datetime, timedelta, timezone
@@ -248,6 +276,19 @@ def get_all_folders_recursive(service, folder_id: str, include_shared: bool = Tr
 def health():
     return {"ok": True, "gemini_key_configured": bool(GEMINI_API_KEY)}
 
+@app.post("/user_credits")
+async def get_user_credits(access_token: str = Body(..., embed=True)):
+    """Get user's current credit balance"""
+    email = await get_user_email_from_token(access_token)
+    if not email:
+        raise HTTPException(status_code=401, detail="Invalid access token")
+    
+    # Create or get user
+    token_hash = hashlib.sha256(access_token.encode()).hexdigest()
+    user = await db.get_or_create_user(email, token_hash)
+    
+    return {"credits": user["credits"], "email": email}
+
 @app.post("/search_images")
 def search_images(req: SearchReq):
     """Search for images across Google Drive using a search query"""
@@ -325,6 +366,27 @@ def list_images(req: ListReq):
 @app.post("/suggest_names")
 async def suggest_names(req: SuggestReq):
     """Generate AI suggestions for image names"""
+    # Get user email and check credits
+    email = await get_user_email_from_token(req.access_token)
+    if not email:
+        raise HTTPException(status_code=401, detail="Invalid access token")
+    
+    # Create or get user
+    token_hash = hashlib.sha256(req.access_token.encode()).hexdigest()
+    user = await db.get_or_create_user(email, token_hash)
+    
+    # Check if user has enough credits
+    credits_needed = len(req.files)
+    if user["credits"] < credits_needed:
+        raise HTTPException(status_code=402, detail=f"Insufficient credits. Need {credits_needed}, have {user['credits']}")
+    
+    # Deduct credits upfront
+    success = await db.deduct_credits(email, credits_needed, f"AI rename for {credits_needed} images")
+    if not success:
+        raise HTTPException(status_code=402, detail="Failed to deduct credits")
+    
+    logger.info(f"Deducted {credits_needed} credits from user {email}")
+    
     svc = drive_client(req.access_token)
     out = []
     for f in req.files:

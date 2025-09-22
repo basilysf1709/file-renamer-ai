@@ -6,6 +6,8 @@ type S = {
   folderId?: string
   files: any[]
   suggestions: any[]
+  userCredits?: number
+  userEmail?: string
   set: (p: Partial<S>) => void
 }
 

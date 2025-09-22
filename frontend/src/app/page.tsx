@@ -8,7 +8,7 @@ const isProd = typeof window !== 'undefined' ? window.location.hostname !== 'loc
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_BASE || (isProd ? '/api' : 'http://localhost:8000')
 
 export default function Page() {
-  const { accessToken, folderId, files, suggestions, set } = useSession()
+  const { accessToken, folderId, files, suggestions, userCredits, userEmail, set } = useSession()
   const [isBusy, setIsBusy] = useState(false)
   const [recursive, setRecursive] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -63,6 +63,13 @@ export default function Page() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, folderId])
 
+  useEffect(() => {
+    if (accessToken) {
+      fetchUserCredits()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken])
+
   async function aiRenameAll() {
     if (!hasFiles) return
     setIsBusy(true)
@@ -78,8 +85,16 @@ export default function Page() {
         setError('Access token expired. Please sign in again.')
         return
       }
+      if (sRes.status === 402) {
+        // Insufficient credits
+        const errorData = await sRes.json().catch(() => ({ detail: 'Insufficient credits' }))
+        setError(errorData.detail || 'Insufficient credits. Please purchase more credits.')
+        fetchUserCredits() // Refresh credits display
+        return
+      }
       const s = await sRes.json()
       set({ suggestions: s.items })
+      fetchUserCredits() // Refresh credits after successful operation
       const errs = (s.items || []).filter((x:any)=>x.error)
       const many401 = errs.length > 0 && errs.every((x:any)=> String(x.error).includes('Gemini error 401') || String(x.error).includes('UNAUTHENTICATED'))
       if (many401) {
@@ -121,6 +136,34 @@ export default function Page() {
     } finally { setIsBusy(false) }
   }
 
+  function buyCredits(amount: number) {
+    const stripeUrl = amount === 100 
+      ? 'https://buy.stripe.com/9B628r4Tz8Sd6Ci1me6oo03'
+      : 'https://buy.stripe.com/fZudR93Pv8Sd7Gmfd46oo04'
+    window.open(stripeUrl, '_blank')
+  }
+
+  async function fetchUserCredits() {
+    if (!accessToken) return
+    try {
+      const r = await fetch(`${BACKEND}/user_credits`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ access_token: accessToken })
+      })
+      if (r.status === 401) {
+        set({ accessToken: undefined })
+        setError('Access token expired. Please sign in again.')
+        return
+      }
+      if (r.ok) {
+        const data = await r.json()
+        set({ userCredits: data.credits, userEmail: data.email })
+      }
+    } catch (e:any) {
+      console.error('Failed to fetch credits:', e)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-white">
       {/* Hero */}
@@ -143,13 +186,34 @@ export default function Page() {
 
         {/* Quick chips */}
         <div className="flex flex-wrap items-center gap-2 justify-center mt-4 text-sm">
-          <button onClick={signIn} disabled={isBusy} className="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 disabled:opacity-50">Sign in</button>
+          {!accessToken && (
+            <button onClick={signIn} disabled={isBusy} className="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 disabled:opacity-50">Sign in</button>
+          )}
           <button onClick={pickFolder} disabled={isBusy} className="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 disabled:opacity-50">Pick folder</button>
           <button onClick={aiRenameAll} disabled={isBusy || !hasFiles} className="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 disabled:opacity-50">AI rename</button>
           <label className="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 cursor-pointer">
             <input type="checkbox" disabled={isBusy} checked={recursive} onChange={(e)=>setRecursive(e.target.checked)} className="mr-2"/>
             Recursive
           </label>
+          {accessToken && (
+            <div className="flex items-center gap-2">
+              <div className="px-3 py-1.5 rounded-full border border-green-200 bg-green-50 text-green-700">
+                {userCredits ?? '...'} credits
+              </div>
+              <button 
+                onClick={() => buyCredits(100)} 
+                className="px-3 py-1.5 rounded-full border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
+              >
+                +100 credits - $13
+              </button>
+              <button 
+                onClick={() => buyCredits(1000)} 
+                className="px-3 py-1.5 rounded-full border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
+              >
+                +1000 credits - $99
+              </button>
+            </div>
+          )}
         </div>
 
         {error && (
