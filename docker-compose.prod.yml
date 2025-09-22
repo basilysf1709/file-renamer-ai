@@ -13,6 +13,9 @@ services:
       - backend
     networks:
       - appnet
+  frontend:
+    environment:
+      - NEXT_PUBLIC_BACKEND_BASE=/api
 
 volumes:
   caddy_data:
