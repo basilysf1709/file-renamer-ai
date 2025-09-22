@@ -34,6 +34,12 @@ export default function Page() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ access_token: accessToken, folder_id: fid, recursive })
       })
+      if (r.status === 401) {
+        // Token expired, clear it and require re-login
+        set({ accessToken: undefined })
+        setError('Access token expired. Please sign in again.')
+        return
+      }
       if (!r.ok) throw new Error(`list_images ${r.status}`)
       const j = await r.json()
       set({ files: j.files })
@@ -66,6 +72,12 @@ export default function Page() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ access_token: accessToken, files })
       })
+      if (sRes.status === 401) {
+        // Token expired, clear it and require re-login
+        set({ accessToken: undefined })
+        setError('Access token expired. Please sign in again.')
+        return
+      }
       const s = await sRes.json()
       set({ suggestions: s.items })
       const errs = (s.items || []).filter((x:any)=>x.error)
@@ -88,6 +100,12 @@ export default function Page() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ access_token: accessToken, items })
       })
+      if (r.status === 401) {
+        // Token expired, clear it and require re-login
+        set({ accessToken: undefined })
+        setError('Access token expired. Please sign in again.')
+        return
+      }
       if (!r.ok) throw new Error(`download_zip ${r.status}`)
       const blob = await r.blob()
       const url = URL.createObjectURL(blob)
@@ -108,7 +126,7 @@ export default function Page() {
       {/* Hero */}
       <div className="max-w-4xl mx-auto pt-16 pb-10 px-4 text-center">
         <div className="text-4xl md:text-5xl font-[var(--font-playfair)] leading-tight">
-          How’s it going?
+          Renamer Drive AI
         </div>
         <p className="mt-3 text-gray-600">Rename Drive photos with AI. Pick a folder to begin.</p>
       </div>

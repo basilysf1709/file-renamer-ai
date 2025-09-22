@@ -108,7 +108,20 @@ class ZipReq(BaseModel):
 # ---- Utils ----
 
 def drive_client(access_token: str):
-    creds = Credentials(token=access_token)
+    from datetime import datetime, timedelta, timezone
+    
+    class NoRefreshCredentials(Credentials):
+        def refresh(self, request):
+            # Disable automatic refresh to prevent RefreshError
+            # Since we're using short-lived access tokens from frontend, we don't want auto-refresh
+            pass
+    
+    creds = NoRefreshCredentials(
+        token=access_token,
+        scopes=["https://www.googleapis.com/auth/drive"]
+    )
+    # Set expiry far in the future to prevent refresh triggers
+    creds.expiry = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=24)
     return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 @retry(wait=wait_exponential(multiplier=0.5, min=1, max=8), stop=stop_after_attempt(5))
@@ -269,17 +282,24 @@ def search_images(req: SearchReq):
 def list_images(req: ListReq):
     """List images in a specific folder, optionally recursively"""
     try:
+        logger.info(f"list_images START folder={req.folder_id} recursive={req.recursive} include_shared={req.include_shared}")
         svc = drive_client(req.access_token)
+        logger.info(f"list_images drive_client created successfully")
+        
         if req.recursive:
+            logger.info(f"list_images getting recursive folders")
             all_folders = get_all_folders_recursive(svc, req.folder_id, req.include_shared)
+            logger.info(f"list_images found {len(all_folders)} folders recursively")
             folder_query = " or ".join([f"'{folder_id}' in parents" for folder_id in all_folders])
             q = f"({folder_query}) and mimeType contains 'image/' and trashed = false"
         else:
             q = f"'{req.folder_id}' in parents and mimeType contains 'image/' and trashed = false"
-        logger.info(f"list_images folder={req.folder_id} recursive={req.recursive} include_shared={req.include_shared}")
+        
+        logger.info(f"list_images query: {q}")
         files = []
         pageToken = None
         while True:
+            logger.info(f"list_images calling files().list() pageToken={pageToken}")
             resp = svc.files().list(
                 q=q,
                 fields="nextPageToken, files(id,name,mimeType,createdTime,parents)",
@@ -296,6 +316,11 @@ def list_images(req: ListReq):
     except HttpError as e:
         logger.error(f"Drive error list_images: {e}")
         raise HTTPException(status_code=e.resp.status, detail=str(e))
+    except Exception as e:
+        logger.error(f"Unexpected error list_images: {type(e).__name__}: {e}")
+        import traceback
+        logger.error(f"list_images traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
 @app.post("/suggest_names")
 async def suggest_names(req: SuggestReq):
