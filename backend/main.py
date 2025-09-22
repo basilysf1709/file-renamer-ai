@@ -303,51 +303,6 @@ async def get_user_credits(access_token: str = Body(..., embed=True)):
     
     return {"credits": user["credits"], "email": email}
 
-@app.post("/add_credits")
-async def add_credits_manual(access_token: str = Body(...), credits: int = Body(...)):
-    """Manually add credits to user account (temporary solution until Stripe webhook is configured)"""
-    email = await get_user_email_from_token(access_token)
-    if not email:
-        raise HTTPException(status_code=401, detail="Invalid access token")
-    
-    success = await db.add_credits(email, credits, None, f"Manual credit addition: {credits} credits")
-    if success:
-        updated_credits = await db.get_user_credits(email)
-        logger.info(f"Manually added {credits} credits to {email}. New balance: {updated_credits}")
-        return {"success": True, "credits_added": credits, "new_balance": updated_credits}
-    else:
-        raise HTTPException(status_code=500, detail="Failed to add credits")
-
-@app.post("/search_images")
-def search_images(req: SearchReq):
-    """Search for images across Google Drive using a search query"""
-    try:
-        svc = drive_client(req.access_token)
-        q = f"mimeType contains 'image/' and trashed = false"
-        if req.search_query.strip():
-            q += f" and (name contains '{req.search_query}' or fullText contains '{req.search_query}')"
-        logger.info(f"search_images query='{req.search_query}' include_shared={req.include_shared} max={req.max_results}")
-        files = []
-        pageToken = None
-        while len(files) < req.max_results:
-            resp = svc.files().list(
-                q=q,
-                fields="nextPageToken, files(id,name,mimeType,createdTime,parents)",
-                includeItemsFromAllDrives=req.include_shared,
-                supportsAllDrives=req.include_shared,
-                pageToken=pageToken,
-                pageSize=min(100, req.max_results - len(files))
-            ).execute()
-            files.extend(resp.get('files', []))
-            pageToken = resp.get('nextPageToken')
-            if not pageToken or len(files) >= req.max_results:
-                break
-        logger.info(f"search_images found={len(files)}")
-        return {"files": files[:req.max_results], "total_found": len(files)}
-    except HttpError as e:
-        logger.error(f"Drive error search_images: {e}")
-        raise HTTPException(status_code=e.resp.status, detail=str(e))
-
 @app.post("/list_images")
 def list_images(req: ListReq):
     """List images in a specific folder, optionally recursively"""
@@ -427,23 +382,6 @@ async def suggest_names(req: SuggestReq):
             logger.error(f"suggest_names failed for id={f.id} name={f.name}: {ex}")
             out.append({"id": f.id, "old_name": f.name, "error": str(ex)})
     return {"items": out}
-
-@app.post("/rename")
-def rename(req: RenameReq):
-    """Bulk rename files"""
-    svc = drive_client(req.access_token)
-    results = []
-    for it in req.items:
-        try:
-            resp = drive_update_name(svc, it.id, it.new_name, req.supports_all_drives)
-            results.append({"id": it.id, "new_name": resp.get('name')})
-        except HttpError as e:
-            logger.error(f"rename failed for id={it.id}: {e}")
-            results.append({"id": it.id, "error": f"{e.resp.status}: {e}"})
-        except Exception as e:
-            logger.error(f"rename failed for id={it.id}: {e}")
-            results.append({"id": it.id, "error": str(e)})
-    return {"results": results}
 
 @app.get("/download")
 def download(access_token: str = Query(...), id: str = Query(...), name: str = Query(...)):
