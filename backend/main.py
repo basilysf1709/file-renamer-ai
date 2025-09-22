@@ -421,16 +421,22 @@ def download_zip(req: ZipReq):
                             status, done = downloader.next_chunk()
                         buf.seek(0)
                         zf.writestr(it.name, buf.read())
+                        logger.info(f"Added {it.name} to zip")
                     except Exception as e:
                         logger.error(f"zip add failed for {it.id}: {e}")
                         zf.writestr(f"ERROR_{it.name}.txt", str(e))
             mem.seek(0)
-            yield from mem.getbuffer()
+            zip_data = mem.read()
+            logger.info(f"Created zip file with {len(zip_data)} bytes")
+            yield zip_data
         headers = { 'Content-Disposition': 'attachment; filename="renamed-images.zip"' }
         return StreamingResponse(iter_zip(), media_type='application/zip', headers=headers)
     except HttpError as e:
         logger.error(f"download_zip failed: {e}")
         raise HTTPException(status_code=e.resp.status, detail=str(e))
+    except Exception as e:
+        logger.error(f"download_zip unexpected error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/stripe-webhook")
 async def stripe_webhook(request: Request):
