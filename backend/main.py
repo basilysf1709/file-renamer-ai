@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
-import io, base64, os
+import io, base64, os, time, hashlib
 from loguru import logger
 from tenacity import retry, wait_exponential, stop_after_attempt
 from PIL import Image
@@ -11,12 +11,18 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import httpx
 from dotenv import load_dotenv
+from fastapi.responses import StreamingResponse
+from fastapi import Query, Request
+from pillow_heif import register_heif_opener
+
+# Register HEIF/HEIC opener for Pillow
+register_heif_opener()
 
 # Load environment variables from .env file
 load_dotenv()
 
 # ---- Config ----
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 THUMBNAIL_MAX_SIDE = int(os.getenv("THUMBNAIL_MAX_SIDE", "1024"))
 
 app = FastAPI()
@@ -27,6 +33,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+# ---- Startup logs ----
+key_fingerprint = None
+if GEMINI_API_KEY:
+    try:
+        key_fingerprint = hashlib.sha256(GEMINI_API_KEY.encode()).hexdigest()[:8]
+    except Exception:
+        key_fingerprint = "error"
+logger.info(f"Backend starting. Gemini key configured={bool(GEMINI_API_KEY)} fingerprint={key_fingerprint}")
+logger.info(f"THUMBNAIL_MAX_SIDE={THUMBNAIL_MAX_SIDE}")
+
+# ---- Request logging middleware ----
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.time()
+    try:
+        response = await call_next(request)
+        ms = int((time.time() - start) * 1000)
+        logger.info(f"{request.method} {request.url.path} {response.status_code} {ms}ms")
+        return response
+    except Exception as e:
+        ms = int((time.time() - start) * 1000)
+        logger.exception(f"{request.method} {request.url.path} error after {ms}ms: {e}")
+        raise
 
 # ---- Models ----
 class SearchReq(BaseModel):
@@ -61,6 +91,19 @@ class RenameReq(BaseModel):
     items: List[RenameItem]
     supports_all_drives: bool = True
 
+class DownloadReq(BaseModel):
+    access_token: str
+    file_id: str
+    name: str
+
+class ZipItem(BaseModel):
+    id: str
+    name: str
+
+class ZipReq(BaseModel):
+    access_token: str
+    items: List[ZipItem]
+
 # ---- Utils ----
 
 def drive_client(access_token: str):
@@ -86,24 +129,35 @@ def clamp_name(base: str, ext: str) -> str:
 
 async def gemini_name_for_image(img_bytes: bytes, created_time: str, orig_name: str) -> str:
     # Reduce size for token & speed
-    image = Image.open(io.BytesIO(img_bytes)).convert('RGB')
+    try:
+        image = Image.open(io.BytesIO(img_bytes)).convert('RGB')
+    except Exception as e:
+        raise RuntimeError(f"Image decode failed: {e}")
+    # Fail fast if key missing
+    if not GEMINI_API_KEY:
+        raise RuntimeError("Gemini API key not configured. Set GEMINI_API_KEY or GOOGLE_API_KEY in backend environment.")
     image.thumbnail((THUMBNAIL_MAX_SIDE, THUMBNAIL_MAX_SIDE))
     buf = io.BytesIO()
     image.save(buf, format='JPEG', quality=85)
     b64 = base64.b64encode(buf.getvalue()).decode('utf-8')
 
+    # Preserve original extension if present and known
+    ext = os.path.splitext(orig_name)[1].lower() or '.jpg'
+    if ext not in ['.jpg', '.jpeg', '.png', '.heic', '.heif', '.webp']:
+        ext = '.jpg'
+
     prompt = (
         "You are a filename suggester. Return ONLY a filename (no quotes). Rules: "
         "lowercase, kebab-case, include yyyy-mm-dd (use provided createdTime if EXIF unknown), "
-        "1-2 salient subjects, ascii only, <=80 chars (base), keep extension .jpg. "
-        f"createdTime={created_time} orig={orig_name}. Example: 2024-07-18-toronto-cn-tower-blue-hour.jpg"
+        f"1-2 salient subjects, ascii only, <=80 chars (base), keep extension {ext}. "
+        f"createdTime={created_time} orig={orig_name}. Example: 2024-07-18-toronto-cn-tower-blue-hour{ext}"
     )
 
-    # Minimal Gemini (REST) call to gemini-1.5-flash with inline image
     url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
     headers = {"Content-Type": "application/json"}
     payload = {
         "contents": [{
+            "role": "user",
             "parts": [
                 {"text": prompt},
                 {"inlineData": {"mimeType": "image/jpeg", "data": b64}}
@@ -111,16 +165,30 @@ async def gemini_name_for_image(img_bytes: bytes, created_time: str, orig_name: 
         }]
     }
     params = {"key": GEMINI_API_KEY}
+    logger.info(f"Calling Gemini for {orig_name} ext={ext} thumb={len(b64)}b key_fp={key_fingerprint}")
     async with httpx.AsyncClient(timeout=60) as client:
         r = await client.post(url, headers=headers, params=params, json=payload)
-        r.raise_for_status()
+        try:
+            r.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            detail = None
+            try:
+                detail = r.json()
+            except Exception:
+                detail = r.text
+            logger.error(f"Gemini HTTP {r.status_code} for {orig_name}: {detail}")
+            if r.status_code == 401:
+                raise RuntimeError("Gemini auth failed (401). Use a Google AI Studio Generative Language API key on the backend, not OAuth or other Google API keys.") from e
+            raise RuntimeError(f"Gemini error {r.status_code}: {detail}") from e
         data = r.json()
         text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        logger.info(f"Gemini suggested for {orig_name}: {text}")
         # sanitize and clamp
-        if not text.endswith('.jpg'):
-            text = text.split('.')[0] + '.jpg'
-        name_no_ext = text[:-4]
-        return clamp_name(name_no_ext, '.jpg')
+        if not text.endswith(ext):
+            base = text.split('.')[0]
+            text = base + ext
+        name_no_ext = text[:-len(ext)]
+        return clamp_name(name_no_ext, ext)
 
 async def drive_download_image(service, file_id: str) -> bytes:
     # Simple download
@@ -164,19 +232,17 @@ def get_all_folders_recursive(service, folder_id: str, include_shared: bool = Tr
 # ---- Routes ----
 @app.get("/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "gemini_key_configured": bool(GEMINI_API_KEY)}
 
 @app.post("/search_images")
 def search_images(req: SearchReq):
     """Search for images across Google Drive using a search query"""
     try:
         svc = drive_client(req.access_token)
-        
-        # Build search query for images
         q = f"mimeType contains 'image/' and trashed = false"
         if req.search_query.strip():
             q += f" and (name contains '{req.search_query}' or fullText contains '{req.search_query}')"
-        
+        logger.info(f"search_images query='{req.search_query}' include_shared={req.include_shared} max={req.max_results}")
         files = []
         pageToken = None
         while len(files) < req.max_results:
@@ -188,14 +254,14 @@ def search_images(req: SearchReq):
                 pageToken=pageToken,
                 pageSize=min(100, req.max_results - len(files))
             ).execute()
-            
             files.extend(resp.get('files', []))
             pageToken = resp.get('nextPageToken')
             if not pageToken or len(files) >= req.max_results:
                 break
-        
+        logger.info(f"search_images found={len(files)}")
         return {"files": files[:req.max_results], "total_found": len(files)}
     except HttpError as e:
+        logger.error(f"Drive error search_images: {e}")
         raise HTTPException(status_code=e.resp.status, detail=str(e))
 
 @app.post("/list_images")
@@ -203,15 +269,13 @@ def list_images(req: ListReq):
     """List images in a specific folder, optionally recursively"""
     try:
         svc = drive_client(req.access_token)
-        
         if req.recursive:
-            # Get all folders recursively
             all_folders = get_all_folders_recursive(svc, req.folder_id, req.include_shared)
             folder_query = " or ".join([f"'{folder_id}' in parents" for folder_id in all_folders])
             q = f"({folder_query}) and mimeType contains 'image/' and trashed = false"
         else:
             q = f"'{req.folder_id}' in parents and mimeType contains 'image/' and trashed = false"
-        
+        logger.info(f"list_images folder={req.folder_id} recursive={req.recursive} include_shared={req.include_shared}")
         files = []
         pageToken = None
         while True:
@@ -226,9 +290,10 @@ def list_images(req: ListReq):
             pageToken = resp.get('nextPageToken')
             if not pageToken:
                 break
-        
+        logger.info(f"list_images returned={len(files)}")
         return {"files": files}
     except HttpError as e:
+        logger.error(f"Drive error list_images: {e}")
         raise HTTPException(status_code=e.resp.status, detail=str(e))
 
 @app.post("/suggest_names")
@@ -238,11 +303,11 @@ async def suggest_names(req: SuggestReq):
     out = []
     for f in req.files:
         try:
-            # download & generate suggestion
             img = await drive_download_image(svc, f.id)
             suggested = await gemini_name_for_image(img, f.createdTime or '', f.name)
             out.append({"id": f.id, "old_name": f.name, "suggested_name": suggested})
         except Exception as ex:
+            logger.error(f"suggest_names failed for id={f.id} name={f.name}: {ex}")
             out.append({"id": f.id, "old_name": f.name, "error": str(ex)})
     return {"items": out}
 
@@ -256,7 +321,58 @@ def rename(req: RenameReq):
             resp = drive_update_name(svc, it.id, it.new_name, req.supports_all_drives)
             results.append({"id": it.id, "new_name": resp.get('name')})
         except HttpError as e:
+            logger.error(f"rename failed for id={it.id}: {e}")
             results.append({"id": it.id, "error": f"{e.resp.status}: {e}"})
         except Exception as e:
+            logger.error(f"rename failed for id={it.id}: {e}")
             results.append({"id": it.id, "error": str(e)})
     return {"results": results}
+
+@app.get("/download")
+def download(access_token: str = Query(...), id: str = Query(...), name: str = Query(...)):
+    svc = drive_client(access_token)
+    try:
+        from googleapiclient.http import MediaIoBaseDownload
+        req_media = svc.files().get_media(fileId=id)
+        buf = io.BytesIO()
+        downloader = MediaIoBaseDownload(buf, req_media)
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+        buf.seek(0)
+        logger.info(f"download id={id} name={name} size={buf.getbuffer().nbytes}")
+        return StreamingResponse(buf, media_type='application/octet-stream', headers={
+            'Content-Disposition': f"attachment; filename=\"{name}\""
+        })
+    except HttpError as e:
+        logger.error(f"download failed id={id}: {e}")
+        raise HTTPException(status_code=e.resp.status, detail=str(e))
+
+@app.post("/download_zip")
+def download_zip(req: ZipReq):
+    svc = drive_client(req.access_token)
+    try:
+        import zipfile
+        def iter_zip():
+            mem = io.BytesIO()
+            with zipfile.ZipFile(mem, mode='w', compression=zipfile.ZIP_DEFLATED) as zf:
+                for it in req.items:
+                    try:
+                        from googleapiclient.http import MediaIoBaseDownload
+                        buf = io.BytesIO()
+                        downloader = MediaIoBaseDownload(buf, svc.files().get_media(fileId=it.id))
+                        done = False
+                        while not done:
+                            status, done = downloader.next_chunk()
+                        buf.seek(0)
+                        zf.writestr(it.name, buf.read())
+                    except Exception as e:
+                        logger.error(f"zip add failed for {it.id}: {e}")
+                        zf.writestr(f"ERROR_{it.name}.txt", str(e))
+            mem.seek(0)
+            yield from mem.getbuffer()
+        headers = { 'Content-Disposition': 'attachment; filename="renamed-images.zip"' }
+        return StreamingResponse(iter_zip(), media_type='application/zip', headers=headers)
+    except HttpError as e:
+        logger.error(f"download_zip failed: {e}")
+        raise HTTPException(status_code=e.resp.status, detail=str(e))
