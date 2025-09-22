@@ -4,7 +4,8 @@ import { initPicker } from '@/lib/google'
 import { useEffect, useMemo, useState } from 'react'
 import { Plus, SlidersHorizontal, Image as ImageIcon } from 'lucide-react'
 
-const BACKEND = process.env.NEXT_PUBLIC_BACKEND_BASE!
+const isProd = typeof window !== 'undefined' ? window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1' : process.env.NODE_ENV === 'production'
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_BASE || (isProd ? '/api' : 'http://localhost:8000')
 
 export default function Page() {
   const { accessToken, folderId, files, suggestions, set } = useSession()
