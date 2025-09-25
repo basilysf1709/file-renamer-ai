@@ -1,1 +1,0 @@
-ssh root@159.203.39.234 'cd /opt/renamer-drive && docker compose --env-file .env -f docker-compose.yml -f docker-compose.prod.yml build --no-cache frontend && docker compose --env-file .env -f docker-compose.yml -f docker-compose.prod.yml up -d frontend'

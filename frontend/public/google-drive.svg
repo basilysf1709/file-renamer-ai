@@ -1,0 +1,10 @@
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Blue triangle on top -->
+  <path d="M7.5 8L12 2L16.5 8H7.5Z" fill="#4285F4"/>
+  <!-- Green triangle on bottom left -->  
+  <path d="M2 15L7.5 8L10 12L5 19L2 15Z" fill="#0F9D58"/>
+  <!-- Red triangle on bottom right -->
+  <path d="M14 12L16.5 8L22 15L19 19L14 12Z" fill="#EA4335"/>
+  <!-- Yellow triangle in center -->
+  <path d="M10 12L14 12L12 16L10 12Z" fill="#FBBC04"/>
+</svg> 

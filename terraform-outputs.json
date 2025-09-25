@@ -1,0 +1,32 @@
+{
+  "asg_name": {
+    "sensitive": false,
+    "type": "string",
+    "value": "renamer-ai-b6b712e4-asg"
+  },
+  "bucket_in": {
+    "sensitive": false,
+    "type": "string",
+    "value": "renamer-ai-b6b712e4-input"
+  },
+  "bucket_out": {
+    "sensitive": false,
+    "type": "string",
+    "value": "renamer-ai-b6b712e4-output"
+  },
+  "instance_sg": {
+    "sensitive": false,
+    "type": "string",
+    "value": "sg-0399be7d407ea2000"
+  },
+  "public_note": {
+    "sensitive": false,
+    "type": "string",
+    "value": "API available on EC2 public IP:80 once instance boots."
+  },
+  "queue_url": {
+    "sensitive": false,
+    "type": "string",
+    "value": "https://sqs.us-east-1.amazonaws.com/555873675910/renamer-ai-b6b712e4-jobs"
+  }
+}

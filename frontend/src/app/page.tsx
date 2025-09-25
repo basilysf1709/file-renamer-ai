@@ -2,7 +2,7 @@
 import { useSession } from '@/store/useSession'
 import { initPicker } from '@/lib/google'
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, SlidersHorizontal, Image as ImageIcon } from 'lucide-react'
+import { Plus, SlidersHorizontal, Image as ImageIcon, Upload, Database, FolderOpen, Cloud } from 'lucide-react'
 
 const isProd = typeof window !== 'undefined' ? window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1' : process.env.NODE_ENV === 'production'
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_BASE || (isProd ? '/api' : 'http://localhost:8000')
@@ -12,6 +12,7 @@ export default function Page() {
   const [isBusy, setIsBusy] = useState(false)
   const [recursive, setRecursive] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [isDragOver, setIsDragOver] = useState(false)
   const hasFiles = files.length > 0
   const preview = useMemo(()=> files.slice(0, 9), [files])
 
@@ -54,6 +55,31 @@ export default function Page() {
       set({ folderId: fid })
       await listImages(fid)
     })
+  }
+
+  // Handle drag and drop for folders
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(false)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(false)
+    
+    if (!accessToken) {
+      alert('Please sign in first')
+      return
+    }
+
+    // For now, just trigger the folder picker since Google Drive API doesn't support direct folder drops
+    // In the future, this could be enhanced to handle file system folders if needed
+    pickFolder()
   }
 
   useEffect(() => {
@@ -102,6 +128,29 @@ export default function Page() {
       }
     } catch (e:any) {
       setError(e?.message || 'AI rename failed')
+    } finally { setIsBusy(false) }
+  }
+
+  async function metadataRenameAll() {
+    if (!hasFiles) return
+    setIsBusy(true)
+    setError(null)
+    try {
+      const sRes = await fetch(`${BACKEND}/metadata_rename`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ access_token: accessToken, files })
+      })
+      if (sRes.status === 401) {
+        // Token expired, clear it and require re-login
+        set({ accessToken: undefined })
+        setError('Access token expired. Please sign in again.')
+        return
+      }
+      if (!sRes.ok) throw new Error(`metadata_rename ${sRes.status}`)
+      const s = await sRes.json()
+      set({ suggestions: s.items })
+    } catch (e:any) {
+      setError(e?.message || 'Metadata rename failed')
     } finally { setIsBusy(false) }
   }
 
@@ -184,21 +233,20 @@ export default function Page() {
 
       {/* Controls */}
       <div className="max-w-3xl mx-auto px-4">
-        {/* <div className="bg-white border border-gray-200 rounded-2xl shadow-sm">
-          <div className="flex items-center px-4 py-3">
-            <button disabled={isBusy} className="w-9 h-9 grid place-items-center rounded-lg border border-gray-200 mr-2 hover:bg-gray-50 disabled:opacity-50"><Plus className="w-4 h-4"/></button>
-            <button disabled={isBusy} className="w-9 h-9 grid place-items-center rounded-lg border border-gray-200 mr-2 hover:bg-gray-50 disabled:opacity-50"><SlidersHorizontal className="w-4 h-4"/></button>
-            <div className="flex-1" />
-          </div>
-        </div> */}
-
         {/* Quick chips */}
         <div className="flex flex-wrap items-center gap-2 justify-center mt-4 text-sm">
           {!accessToken && (
             <button onClick={signIn} disabled={isBusy} className="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 disabled:opacity-50">Sign in</button>
           )}
-          <button onClick={pickFolder} disabled={isBusy} className="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 disabled:opacity-50">Pick folder</button>
+          <button onClick={pickFolder} disabled={isBusy} className="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 disabled:opacity-50 flex items-center gap-2">
+            <Cloud className="w-4 h-4 text-blue-500" />
+            Pick folder
+          </button>
           <button onClick={aiRenameAll} disabled={isBusy || !hasFiles} className="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 disabled:opacity-50">AI rename</button>
+          <button onClick={metadataRenameAll} disabled={isBusy || !hasFiles} className="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 disabled:opacity-50 flex items-center gap-2">
+            <Database className="w-4 h-4" />
+            Metadata rename
+          </button>
           <label className="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 cursor-pointer">
             <input type="checkbox" disabled={isBusy} checked={recursive} onChange={(e)=>setRecursive(e.target.checked)} className="mr-2"/>
             Recursive
@@ -231,11 +279,22 @@ export default function Page() {
 
       {/* Preview */}
       <div className="max-w-5xl mx-auto px-4 mt-10 pb-16">
-        <div className="bg-white border border-gray-200 rounded-2xl p-6">
+        <div 
+          className={`bg-white border-2 border-dashed rounded-2xl p-6 transition-colors ${
+            isDragOver ? 'border-blue-400 bg-blue-50' : 'border-gray-200'
+          }`}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
           <div className="flex items-center justify-between mb-4">
-            <div className="font-medium text-gray-900 flex items-center gap-2"><ImageIcon className="w-5 h-5"/> Images {hasFiles ? `(${files.length})` : ''}</div>
+            <div className="font-medium text-gray-900 flex items-center gap-2">
+              <ImageIcon className="w-5 h-5"/> 
+              Images {hasFiles ? `(${files.length})` : ''}
+            </div>
             {isBusy && <div className="text-sm text-gray-500">Loading…</div>}
           </div>
+          
           {hasFiles ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {preview.map((f:any)=> (
@@ -246,7 +305,12 @@ export default function Page() {
               ))}
             </div>
           ) : (
-            <div className="text-sm text-gray-500">{isBusy ? 'Loading images…' : 'Nothing yet. Pick a folder to load images.'}</div>
+            <div className="text-center py-12">
+              <Upload className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+              <div className="text-sm text-gray-500">
+                {isBusy ? 'Loading images…' : 'Drop folders here or pick a folder to load images.'}
+              </div>
+            </div>
           )}
 
           {suggestions?.length > 0 && (
@@ -258,13 +322,10 @@ export default function Page() {
               <ul className="space-y-2">
                 {suggestions.map((s:any)=> (
                   <li key={s.id} className="flex items-center justify-between border rounded-lg px-4 py-2">
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <div className="text-sm text-gray-500 truncate">{files.find((f:any)=>f.id===s.id)?.name}</div>
                       <div className="font-medium text-gray-900 truncate">{s.suggested_name || s.error}</div>
                     </div>
-                    {s.suggested_name && (
-                      <a href={`${BACKEND}/download?access_token=${encodeURIComponent(accessToken || '')}&id=${encodeURIComponent(s.id)}&name=${encodeURIComponent(s.suggested_name)}`} className="ml-4 px-3 py-1.5 rounded-lg bg-gray-900 text-white hover:bg-black">Download</a>
-                    )}
                   </li>
                 ))}
               </ul>
