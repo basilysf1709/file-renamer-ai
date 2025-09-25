@@ -17,15 +17,15 @@ apt-get install -y nvidia-container-toolkit
 nvidia-ctk runtime configure --runtime=docker || true
 systemctl restart docker
 
-# Pull app repo (you'll push it later)
+# Pull app repo
 cd /opt
-if [ ! -d renamer-ai ]; then
-  git clone https://github.com/placeholder/renamer-ai.git || {
-    echo "Repository not found, creating empty directory structure"
-    mkdir -p renamer-ai/app
+if [ ! -d renamer-drive ]; then
+  git clone https://github.com/basilysf1709/renamer-drive.git || {
+    echo "Failed to clone repository"
+    exit 1
   }
 fi
-cd renamer-ai/app
+cd renamer-drive/app
 
 # Create env file
 cat > .env <<EOF
