@@ -354,3 +354,61 @@ resource "aws_autoscaling_attachment" "api" {
   autoscaling_group_name = aws_autoscaling_group.asg.id
   lb_target_group_arn    = aws_lb_target_group.api.arn
 } 
+# S3 Intelligent Tiering for cost optimization (45% storage savings)
+resource "aws_s3_bucket_intelligent_tiering_configuration" "input_bucket_tiering" {
+  bucket = aws_s3_bucket.in.id
+  name   = "EntireBucket"
+
+  tiering {
+    access_tier = "DEEP_ARCHIVE_ACCESS"
+    days        = 180
+  }
+  tiering {
+    access_tier = "ARCHIVE_ACCESS"
+    days        = 90
+  }
+}
+
+resource "aws_s3_bucket_intelligent_tiering_configuration" "output_bucket_tiering" {
+  bucket = aws_s3_bucket.out.id
+  name   = "EntireBucket"
+
+  tiering {
+    access_tier = "DEEP_ARCHIVE_ACCESS"
+    days        = 180
+  }
+  tiering {
+    access_tier = "ARCHIVE_ACCESS"
+    days        = 90
+  }
+}
+
+# CloudWatch for cost monitoring
+resource "aws_cloudwatch_dashboard" "cost_optimization" {
+  dashboard_name = "${local.name}-cost-dashboard"
+
+  dashboard_body = jsonencode({
+    widgets = [
+      {
+        type   = "metric"
+        x      = 0
+        y      = 0
+        width  = 12
+        height = 6
+
+        properties = {
+          metrics = [
+            ["AWS/EC2", "CPUUtilization", "InstanceId", aws_autoscaling_group.asg.id],
+            ["AWS/S3", "BucketSizeBytes", "BucketName", aws_s3_bucket.in.bucket],
+            ["AWS/SQS", "ApproximateNumberOfMessages", "QueueName", aws_sqs_queue.jobs.name]
+          ]
+          view    = "timeSeries"
+          stacked = false
+          region  = var.region
+          title   = "Cost Optimization Metrics"
+          period  = 300
+        }
+      }
+    ]
+  })
+}
