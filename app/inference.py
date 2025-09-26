@@ -1,10 +1,27 @@
 from typing import List, Tuple
 import io
+import tempfile
+import os
 from PIL import Image
 import torch
 from transformers import AutoModelForVision2Seq, AutoProcessor
 from settings import settings
 from naming import to_kebab, system_prompt
+
+# Import for HEIC support
+try:
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+    HEIF_AVAILABLE = True
+except ImportError:
+    HEIF_AVAILABLE = False
+
+# Import for SVG support
+try:
+    import cairosvg
+    SVG_AVAILABLE = True
+except ImportError:
+    SVG_AVAILABLE = False
 
 
 class VLM:
@@ -18,9 +35,31 @@ class VLM:
         ).to(self.device)
 
     def preprocess_img(self, b: bytes) -> Image.Image:
-        im = Image.open(io.BytesIO(b)).convert("RGB")
+        # Try to detect file format and handle accordingly
+        try:
+            # First try direct PIL opening (handles JPEG, PNG, etc.)
+            im = Image.open(io.BytesIO(b)).convert("RGB")
+        except Exception as e:
+            # If direct opening fails, try alternative formats
+            try:
+                # Try SVG conversion
+                if SVG_AVAILABLE and b[:5] == b'<?xml' or b'<svg' in b[:100]:
+                    # Convert SVG to PNG first
+                    png_data = cairosvg.svg2png(bytestring=b)
+                    im = Image.open(io.BytesIO(png_data)).convert("RGB")
+                else:
+                    # For HEIC and other formats, save to temp file and try again
+                    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                        tmp.write(b)
+                        tmp.flush()
+                        try:
+                            im = Image.open(tmp.name).convert("RGB")
+                        finally:
+                            os.unlink(tmp.name)
+            except Exception as e2:
+                raise ValueError(f"Unsupported image format. Original error: {e}, Secondary error: {e2}")
+        
         # Resize via processor settings using max_pixels hint
-        # (Some processors accept max_pixels in __call__ kwargs)
         long = max(im.size)
         target_long = int((settings.max_pixels)**0.5)
         if long > target_long:

@@ -5,6 +5,9 @@ pydantic==2.8.2
 pydantic-settings==2.4.0
 python-multipart==0.0.12
 Pillow==10.3.0
+pillow-heif==0.16.0
+cairosvg==2.7.1
+opencv-python-headless==4.10.0.84
 # VLM stack
 torch==2.3.1
 transformers==4.45.2

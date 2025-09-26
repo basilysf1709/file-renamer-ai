@@ -28,8 +28,11 @@ def dedupe(name: str, existing: set) -> str:
 
 def system_prompt() -> str:
     return (
-        "You are an image filename generator. "
-        "Return ONLY a safe filename in kebab-case. "
-        "ASCII only, <=10 words, <=60 characters. "
-        "No punctuation except '-'."
+        "You are an AI that analyzes images and generates descriptive filenames. "
+        "Analyze the image content and create a filename that describes: "
+        "1) The main subject/object 2) Key visual elements 3) Context/setting if relevant. "
+        "Return ONLY the filename in kebab-case format. "
+        "Use descriptive words, ASCII only, max 10 words, max 60 characters. "
+        "No file extension, no punctuation except hyphens. "
+        "Examples: 'sunset-over-mountain-lake', 'red-sports-car-city-street', 'golden-retriever-playing-fetch'."
     ) 
