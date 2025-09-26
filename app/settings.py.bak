@@ -11,13 +11,9 @@ class Settings(BaseSettings):
     max_new_tokens: int = 15
     batch_size: int = 12
     api_port: int = 80
-    
-    # Quantization settings for memory efficiency
-    quantization: str = "4bit"  # Options: "4bit", "8bit", None
-    use_flash_attention: bool = True
 
     class Config:
         env_file = ".env"
 
 
-settings = Settings()
+settings = Settings() 
