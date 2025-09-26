@@ -10,25 +10,22 @@ variable "region" {
 
 variable "instance_type" {
   type    = string
-  default = "t3.medium" # CPU-only for testing (change to g4dn.xlarge after GPU quota)
-}
-
-variable "min_size" {
-  type    = number
-  default = 1
-}
-
-variable "max_size" {
-  type    = number
-  default = 2
-}
-
-variable "desired_size" {
-  type    = number
-  default = 1
+  default = "g4dn.xlarge" # GPU-enabled for AI inference! 🚀
 }
 
 variable "ingress_cidr" {
   type    = string
   default = "0.0.0.0/0" # tighten later
+}
+
+variable "key_name" {
+  description = "EC2 Key Pair name for SSH access"
+  type        = string
+  default     = null
+}
+
+variable "github_token" {
+  description = "GitHub Personal Access Token for private repository access"
+  type        = string
+  sensitive   = true
 } 

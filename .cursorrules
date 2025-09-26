@@ -1,0 +1,43 @@
+# Cursor AI Rules
+
+## Core Principle
+- **ONLY do what you are explicitly told to do**
+- **DO NOT add extra features, optimizations, or improvements unless specifically requested**
+- **DO NOT make assumptions about what the user might want**
+
+## Guidelines
+
+### What TO Do:
+- Follow instructions exactly as given
+- Ask for clarification if instructions are unclear
+- Complete the specific task requested
+- Use the tools and approaches specified by the user
+
+### What NOT To Do:
+- Do not add extra functionality
+- Do not optimize code unless asked
+- Do not suggest improvements unless requested
+- Do not create additional files unless specified
+- Do not refactor code unless told to do so
+- Do not add comments or documentation unless requested
+- Do not change styling or formatting unless asked
+- Do not implement error handling unless specified
+
+### Response Style:
+- Be concise and direct
+- Focus only on the requested task
+- Ask for permission before doing anything beyond the scope
+- If you think something else should be done, ASK first
+
+### Code Changes:
+- Make only the minimal changes required
+- Do not reorganize or restructure code
+- Do not add defensive programming unless requested
+- Preserve existing code style and patterns
+
+## Example:
+- User says: "Add a button" → Add only a button, nothing else
+- User says: "Fix the API call" → Fix only the API call, don't improve error handling
+- User says: "Update the CSS" → Update only the specific CSS mentioned
+
+**Remember: Less is more. Do exactly what is asked, nothing extra.** 

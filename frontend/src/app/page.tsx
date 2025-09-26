@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Plus, SlidersHorizontal, Image as ImageIcon, Upload, Database, FolderOpen, Cloud } from 'lucide-react'
 
 const isProd = typeof window !== 'undefined' ? window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1' : process.env.NODE_ENV === 'production'
-const BACKEND = process.env.NEXT_PUBLIC_BACKEND_BASE || (isProd ? '/api' : 'http://localhost:8000')
+const BACKEND = process.env.BACKEND_BASE || (isProd ? '/api' : 'http://localhost:8000')
 
 export default function Page() {
   const { accessToken, folderId, files, suggestions, userCredits, userEmail, set } = useSession()
@@ -18,7 +18,7 @@ export default function Page() {
 
   function signIn() {
     const tokenClient = (window as any).google.accounts.oauth2.initTokenClient({
-      client_id: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!,
+      client_id: process.env.GOOGLE_CLIENT_ID!,
       scope: 'https://www.googleapis.com/auth/drive',
       callback: (resp: any) => resp?.access_token && set({ accessToken: resp.access_token })
     })

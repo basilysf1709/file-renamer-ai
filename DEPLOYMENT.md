@@ -1,228 +1,228 @@
-# Renamer AI - Production Deployment Guide
+# 🚀 Renamer AI - Deployment Guide
 
-## 🏗️ **Repeatable Deployment Process**
+## ⚡ Zero-Downtime Deployments
 
-This document outlines the production-ready deployment process for the Renamer AI backend.
+Your infrastructure is configured for **zero-downtime deployments** using AWS Auto Scaling Group rolling updates.
 
-### **Prerequisites**
+### 🔄 How It Works
 
-1. **AWS Account** with appropriate permissions
-2. **Terraform ≥ 1.5** installed
-3. **AWS CLI** configured with credentials
-4. **Git repository** with application code
-5. **Docker** for local testing (optional)
+- **2 Instances**: Always runs 2 instances for redundancy
+- **Rolling Updates**: During deployments, keeps 50% capacity (1 instance) healthy
+- **ALB Health Checks**: Only routes traffic to healthy instances
+- **No Downtime**: API remains available throughout deployments
 
-### **Infrastructure Components**
+### 🚀 Deploy Changes
 
-- **Terraform**: Infrastructure as Code
-- **GitHub**: Source code repository
-- **AWS EC2**: GPU-enabled compute instances (g4dn.xlarge)
-- **AWS S3**: Input/output file storage
-- **AWS SQS**: Job queue management
-- **Docker**: Containerized application deployment
-
-## 🚀 **Deployment Steps**
-
-### **1. Repository Setup**
-
+**Quick Deploy:**
 ```bash
-# Ensure code is committed and pushed
-git add .
-git commit -m "Deploy backend updates"
-git push origin main
+./deploy.sh
 ```
 
-### **2. Infrastructure Deployment**
-
+**Manual Deploy:**
 ```bash
-# Navigate to terraform directory
 cd terraform
-
-# Initialize Terraform (first time only)
-terraform init
-
-# Review planned changes
-terraform plan
-
-# Deploy infrastructure
-terraform apply -auto-approve
-
-# Save outputs for reference
-terraform output > ../deployment-outputs.txt
+terraform apply -var="github_token=YOUR_TOKEN"
 ```
 
-### **3. Application Deployment**
-
-The application deploys automatically via EC2 user data script:
-
-1. **Instance Boot**: EC2 instances launch with latest AMI
-2. **Dependencies**: Docker, NVIDIA drivers, build tools installed
-3. **Repository Clone**: Latest code pulled from GitHub
-4. **Container Build**: Docker images built with GPU support
-5. **Service Start**: API and worker services start automatically
-
-### **4. Deployment Verification**
-
+**Code-Only Deploy:**
 ```bash
-# Get instance IP
-INSTANCE_IP=$(terraform output -raw public_ip || aws ec2 describe-instances \
-  --filters "Name=tag:Name,Values=renamer-ai-*" "Name=instance-state-name,Values=running" \
-  --query 'Reservations[].Instances[].PublicIpAddress' --output text)
-
-# Test health endpoint
-curl http://$INSTANCE_IP/health
-
-# Test rename job
-curl -F "files=@test-image.jpg" \
-     -F 'user_prompt=semantic filename with date' \
-     -X POST "http://$INSTANCE_IP/v1/jobs/rename"
+# For application code changes without infrastructure changes
+aws autoscaling start-instance-refresh --auto-scaling-group-name renamer-ai-b6b712e4-asg
 ```
 
-## 🔄 **Update Process**
+### 📊 Deployment Process
 
-### **Code Updates**
+1. **Pre-Check**: Verifies current API health
+2. **Rolling Update**: Launches new instance while keeping old one
+3. **Health Check**: Waits 5 minutes for new instance to be healthy
+4. **Traffic Switch**: ALB routes traffic to new instance
+5. **Cleanup**: Terminates old instance
+6. **Repeat**: Process repeats for second instance
 
-```bash
-# 1. Make changes to application code
-git add .
-git commit -m "Update: feature description"
-git push origin main
-
-# 2. Trigger instance refresh (deploys latest code)
-aws autoscaling start-instance-refresh \
-  --auto-scaling-group-name $(terraform output -raw asg_name)
-
-# 3. Monitor deployment
-aws autoscaling describe-instance-refreshes \
-  --auto-scaling-group-name $(terraform output -raw asg_name)
-```
-
-### **Infrastructure Updates**
-
-```bash
-# 1. Update Terraform configuration files
-# 2. Review changes
-terraform plan
-
-# 3. Apply updates
-terraform apply
-
-# 4. If launch template changed, refresh instances
-aws autoscaling start-instance-refresh \
-  --auto-scaling-group-name $(terraform output -raw asg_name)
-```
-
-## 📊 **Monitoring & Operations**
-
-### **Key Metrics**
-
-- **Instance Health**: Check via AWS Console or CLI
-- **Application Logs**: View via EC2 console logs or SSH
-- **SQS Queue**: Monitor message depth and processing rate
-- **S3 Storage**: Track input/output file volumes
-
-### **Troubleshooting**
-
-```bash
-# Check instance status
-aws ec2 describe-instance-status \
-  --instance-ids $(aws ec2 describe-instances \
-    --filters "Name=tag:Name,Values=renamer-ai-*" \
-    --query 'Reservations[].Instances[].InstanceId' --output text)
-
-# View system logs
-aws ec2 get-console-output \
-  --instance-id INSTANCE_ID --output text
-
-# Check SQS queue depth
-aws sqs get-queue-attributes \
-  --queue-url $(terraform output -raw queue_url) \
-  --attribute-names ApproximateNumberOfMessages
-```
-
-### **Scaling Operations**
-
-```bash
-# Scale up during high load
-aws autoscaling update-auto-scaling-group \
-  --auto-scaling-group-name $(terraform output -raw asg_name) \
-  --desired-capacity 2
-
-# Scale down during low load
-aws autoscaling update-auto-scaling-group \
-  --auto-scaling-group-name $(terraform output -raw asg_name) \
-  --desired-capacity 1
-```
-
-## 🔒 **Security Considerations**
-
-### **Current Setup (Development)**
-- Open HTTP access (0.0.0.0/0)
-- No API authentication
-- Public EC2 instances
-
-### **Production Hardening Checklist**
-
-- [ ] **Restrict network access** - Update security groups
-- [ ] **Add API authentication** - Implement JWT or API keys  
-- [ ] **Use HTTPS** - Add ALB with SSL certificates
-- [ ] **Private networking** - Deploy in private subnets
-- [ ] **Secrets management** - Use AWS Secrets Manager
-- [ ] **Monitoring** - Add CloudWatch alarms
-- [ ] **Backup strategy** - Implement S3 lifecycle policies
-
-## 💰 **Cost Management**
-
-### **Current Costs (Estimated)**
-- **g4dn.xlarge**: ~$0.65/hour (~$450/month on-demand)
-- **g4dn.xlarge Spot**: ~$0.20/hour (~$135/month, 70% savings)
-- **S3 Storage**: ~$0.02/GB/month
-- **SQS Requests**: ~$0.40/million requests
-
-### **Cost Optimization**
-```bash
-# Use Spot Instances (modify launch template)
-# Add lifecycle policies for S3 cleanup
-# Implement auto-scaling based on queue depth
-```
-
-## 🆘 **Disaster Recovery**
-
-### **Backup Strategy**
-- **Infrastructure**: Terraform state in S3 backend (recommended)
-- **Application**: Code in Git repository
-- **Data**: S3 cross-region replication (if needed)
-
-### **Recovery Process**
-```bash
-# Complete infrastructure recreation
-terraform destroy  # if needed
-terraform apply
-
-# Application automatically deploys from Git
-# Data persists in S3 buckets
-```
-
-## 📝 **Environment Management**
-
-### **Development Environment**
-```bash
-# Use smaller instance types for testing
-# Set terraform variables for dev configuration
-terraform apply -var="instance_type=t3.medium"
-```
-
-### **Production Environment**
-```bash
-# Use production configuration
-terraform apply -var="instance_type=g4dn.xlarge"
-```
+**Timeline:**
+- Total Time: ~10-15 minutes
+- Downtime: **0 seconds** ✅
+- Capacity During Deploy: 50% minimum
 
 ---
 
-**✅ This deployment process ensures:**
-- **Repeatability**: Infrastructure as Code with Terraform
-- **Reliability**: Auto Scaling Groups with health checks
-- **Scalability**: Horizontal scaling capabilities
-- **Maintainability**: Clear documentation and monitoring
-- **Security**: Proper IAM roles and network controls 
+# 📖 Detailed Deployment Documentation
+
+## 🎯 Quick Start
+
+This guide provides a **repeatable process** for deploying the Renamer AI backend to AWS.
+
+### Prerequisites
+
+- AWS CLI configured with appropriate credentials
+- Terraform installed
+- GitHub Personal Access Token (for private repository access)
+
+## 🏗️ Initial Infrastructure Deployment
+
+### Step 1: Repository Setup
+
+```bash
+git clone https://github.com/basilysf1709/renamer-drive.git
+cd renamer-drive
+```
+
+### Step 2: Deploy Infrastructure
+
+```bash
+cd terraform
+terraform init
+terraform apply -var="github_token=YOUR_GITHUB_TOKEN"
+```
+
+### Step 3: Monitor Deployment
+
+```bash
+cd ..
+./monitor_init.sh
+```
+
+## 🔄 Application Updates
+
+For code changes without infrastructure modifications:
+
+```bash
+./deploy.sh
+```
+
+For infrastructure changes:
+
+```bash
+cd terraform
+terraform apply -var="github_token=YOUR_GITHUB_TOKEN"
+./deploy.sh  # If instance refresh needed
+```
+
+## 🎮 API Usage
+
+### Stable Endpoint
+
+Your API is available at: `http://renamer-ai-b6b712e4-alb-1893620514.us-east-1.elb.amazonaws.com`
+
+### Test the API
+
+```bash
+# Health check
+curl http://renamer-ai-b6b712e4-alb-1893620514.us-east-1.elb.amazonaws.com/health
+
+# Test job submission
+python3 test_api.py http://renamer-ai-b6b712e4-alb-1893620514.us-east-1.elb.amazonaws.com
+```
+
+## 🔍 Monitoring & Troubleshooting
+
+### Check Deployment Status
+
+```bash
+aws autoscaling describe-instance-refreshes --auto-scaling-group-name renamer-ai-b6b712e4-asg
+```
+
+### Check ALB Target Health
+
+```bash
+aws elbv2 describe-target-health --target-group-arn arn:aws:elasticloadbalancing:us-east-1:555873675910:targetgroup/renamer-ai-b6b712e4-api-tg/fc79c5d90e625cf3
+```
+
+### View Instance Logs
+
+```bash
+aws ec2 get-console-output --instance-id INSTANCE_ID
+```
+
+### SSH to Instance (for debugging)
+
+```bash
+aws ec2 describe-instances --filters "Name=tag:Name,Values=renamer-ai-b6b712e4" "Name=instance-state-name,Values=running"
+# Note: No key pair configured - use AWS Session Manager for access
+```
+
+## 🛡️ Security Considerations
+
+### Production Hardening
+
+1. **Restrict Access**: Update `ingress_cidr` in variables.tf from `0.0.0.0/0` to your IP range
+2. **Enable HTTPS**: Add SSL certificate to ALB
+3. **VPC Isolation**: Move to private subnets with NAT Gateway
+4. **Secrets Rotation**: Rotate GitHub token regularly
+5. **Monitoring**: Set up CloudWatch alarms
+
+### Network Security
+
+```terraform
+variable "ingress_cidr" {
+  type    = string
+  default = "YOUR_IP_RANGE/32"  # Restrict to your IP
+}
+```
+
+## 📊 Cost Management
+
+### Current Resources
+
+- **EC2 Instances**: 2x t3.medium (~$60/month)
+- **Application Load Balancer**: ~$18/month
+- **S3 Storage**: Pay per use
+- **SQS**: Pay per message
+- **Total Estimated**: ~$80/month
+
+### Cost Optimization
+
+1. **GPU Instances**: Switch to g4dn.xlarge after GPU quota approval
+2. **Spot Instances**: Use for non-production workloads
+3. **Reserved Instances**: For predictable workloads
+4. **Auto Scaling**: Scale down during low usage
+
+## 🚨 Disaster Recovery
+
+### Backup Strategy
+
+- **Infrastructure**: All code in Git
+- **Data**: S3 automatically versioned
+- **Configuration**: Terraform state in backend
+
+### Recovery Process
+
+1. **Clone Repository**: `git clone https://github.com/basilysf1709/renamer-drive.git`
+2. **Deploy Infrastructure**: `terraform apply`
+3. **Verify Services**: `./monitor_init.sh`
+
+### Rolling Back
+
+```bash
+# Rollback to previous launch template
+aws autoscaling start-instance-refresh --auto-scaling-group-name renamer-ai-b6b712e4-asg
+```
+
+## 📞 Support
+
+### Common Issues
+
+1. **502 Bad Gateway**: Instances not healthy - check logs
+2. **Refresh Failed**: Check AWS service quotas
+3. **Token Issues**: Verify GitHub token permissions
+
+### Getting Help
+
+- Check AWS Console for detailed error messages
+- Review CloudWatch logs for application errors
+- Use AWS Support for infrastructure issues
+
+---
+
+## 🎉 Summary
+
+You now have a **production-ready, zero-downtime deployment** system:
+
+✅ Stable API endpoint (never changes)  
+✅ Rolling deployments (no downtime)  
+✅ Auto-scaling and load balancing  
+✅ Secure private repository access  
+✅ Infrastructure as Code  
+✅ Monitoring and health checks  
+
+Your API URL: `http://renamer-ai-b6b712e4-alb-1893620514.us-east-1.elb.amazonaws.com` 

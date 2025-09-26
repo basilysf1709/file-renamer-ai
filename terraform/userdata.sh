@@ -3,7 +3,7 @@ set -euxo pipefail
 
 # NVIDIA drivers & Docker
 apt-get update -y
-apt-get install -y docker.io docker-compose python3-pip unzip git jq
+apt-get install -y docker.io docker-compose python3-pip unzip git jq awscli
 usermod -aG docker ubuntu || true
 
 # Install NVIDIA container toolkit (for GPU)
@@ -20,7 +20,10 @@ systemctl restart docker
 # Pull app repo
 cd /opt
 if [ ! -d renamer-drive ]; then
-  git clone https://github.com/basilysf1709/renamer-drive.git || {
+  # Get GitHub token from Parameter Store
+  GITHUB_TOKEN=$(aws ssm get-parameter --name "/renamer-ai/${suffix}/github-token" --with-decryption --region ${region} --query 'Parameter.Value' --output text)
+  
+  git clone https://$GITHUB_TOKEN@github.com/basilysf1709/renamer-drive.git || {
     echo "Failed to clone repository"
     exit 1
   }
@@ -42,7 +45,7 @@ EOF
 
 # Start services (only if docker-compose.yml exists)
 if [ -f docker-compose.yml ]; then
-  /usr/local/bin/docker-compose --env-file .env up -d --pull=always
+  docker-compose --env-file .env up -d --build
 else
   echo "docker-compose.yml not found, skipping service startup"
 fi 

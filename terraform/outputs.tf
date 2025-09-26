@@ -10,8 +10,12 @@ output "queue_url" {
   value = aws_sqs_queue.jobs.url
 }
 
+output "api_url" {
+  value = "http://${aws_lb.main.dns_name}"
+}
+
 output "public_note" {
-  value = "API available on EC2 public IP:80 once instance boots."
+  value = "API available at ALB DNS name (stable endpoint)."
 }
 
 output "asg_name" {
