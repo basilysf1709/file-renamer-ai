@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     batch_size: int = 16  # Optimized for 8-bit quantization
     api_port: int = 80
     
+    # Security
+    api_key: str = "sk-renamer-202509-vK8mF2nP7wQxR9jL5tE3uA6sN1dG4hB8cV0zX2yM9pI7oU5qW3eR6tY8uI1oP4sA"
+    
     # Cost-optimized quantization settings (50% cost reduction, 20% speed boost)
     quantization: str = "8bit"  # Faster than 4-bit, better quality
     use_flash_attention: bool = False  # Disabled for compatibility

@@ -1,5 +1,6 @@
-from fastapi import FastAPI, UploadFile, File, Body, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, UploadFile, File, Body, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import boto3, uuid, json, time, asyncio
 from typing import Optional, List
 from concurrent.futures import ThreadPoolExecutor
@@ -25,6 +26,18 @@ vlm_instance = None
 upload_executor = ThreadPoolExecutor(max_workers=10)  # For parallel S3 uploads
 
 app = FastAPI(title="Renamer AI API")
+
+# Security
+security = HTTPBearer()
+
+def verify_api_key(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Verify API key from Authorization header"""
+    api_key = credentials.credentials
+    valid_api_key = settings.api_key if hasattr(settings, 'api_key') else "sk-renamer-202509-vK8mF2nP7wQxR9jL5tE3uA6sN1dG4hB8cV0zX2yM9pI7oU5qW3eR6tY8uI1oP4sA"
+    
+    if api_key != valid_api_key:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    return api_key
 
 @app.on_event("startup")
 async def startup_event():
@@ -114,7 +127,7 @@ async def debug_test():
     }
 
 @app.post("/v1/preview")
-async def preview_rename(file: UploadFile = File(...), prompt: str = Body("", embed=True)):
+async def preview_rename(file: UploadFile = File(...), prompt: str = Body("", embed=True), api_key: str = Depends(verify_api_key)):
     """Fast preview endpoint with pre-loaded model"""
     print(f"🔍 PREVIEW ENDPOINT called with file: {file.filename}, prompt: {repr(prompt)}")
     try:
@@ -147,7 +160,7 @@ async def preview_rename(file: UploadFile = File(...), prompt: str = Body("", em
         raise HTTPException(status_code=400, detail=f"Preview failed: {str(e)}")
 
 @app.post("/v1/jobs/rename")
-async def create_job(user_prompt: str = Body("", embed=True), files: list[UploadFile] = File(default=[])):
+async def create_job(user_prompt: str = Body("", embed=True), files: list[UploadFile] = File(default=[]), api_key: str = Depends(verify_api_key)):
     """Create rename job with parallel S3 uploads"""
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")

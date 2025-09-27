@@ -1,63 +1,45 @@
 'use client'
 import { useSession } from '@/store/useSession'
-import { initPicker } from '@/lib/google'
 import { useEffect, useMemo, useState } from 'react'
 import { Plus, SlidersHorizontal, Image as ImageIcon, Upload, Database, FolderOpen, Cloud } from 'lucide-react'
 
-const isProd = typeof window !== 'undefined' ? window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1' : process.env.NODE_ENV === 'production'
-const BACKEND = process.env.BACKEND_BASE || (isProd ? '/api' : 'http://localhost:8000')
+
+const API_KEY = process.env.JOB_PERSONAL_API_KEY
 
 export default function Page() {
-  const { accessToken, folderId, files, suggestions, userCredits, userEmail, set } = useSession()
+  const [files, setFiles] = useState<File[]>([])
+  const [suggestions, setSuggestions] = useState<any[]>([])
+  const [userCredits, setUserCredits] = useState<number>(10) // Default credits
   const [isBusy, setIsBusy] = useState(false)
-  const [recursive, setRecursive] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [isDragOver, setIsDragOver] = useState(false)
+  const [currentJobId, setCurrentJobId] = useState<string | null>(null)
   const hasFiles = files.length > 0
-  const preview = useMemo(()=> files.slice(0, 9), [files])
+  const preview = useMemo(()=> files.slice(0, 10), [files])
+  const hasMoreFiles = files.length > 10
 
-  function signIn() {
-    const tokenClient = (window as any).google.accounts.oauth2.initTokenClient({
-      client_id: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!,
-      scope: 'https://www.googleapis.com/auth/drive',
-      callback: (resp: any) => resp?.access_token && set({ accessToken: resp.access_token })
-    })
-    tokenClient.requestAccessToken()
+  function handleFileSelect(event: React.ChangeEvent<HTMLInputElement>) {
+    const selectedFiles = Array.from(event.target.files || [])
+    const imageFiles = selectedFiles.filter(file => file.type.startsWith('image/'))
+    
+    if (imageFiles.length !== selectedFiles.length) {
+      setError('Only image files are supported')
+    } else {
+      setError(null)
+    }
+    
+    setFiles(imageFiles)
+    setSuggestions([]) // Clear previous results
   }
 
-  async function listImages(folderIdOverride?: string) {
-    const fid = folderIdOverride || folderId
-    if (!accessToken || !fid) return
-    setIsBusy(true)
+  function clearFiles() {
+    setFiles([])
+    setSuggestions([])
+    setCurrentJobId(null)
     setError(null)
-    try {
-      const r = await fetch(`${BACKEND}/list_images`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ access_token: accessToken, folder_id: fid, recursive })
-      })
-      if (r.status === 401) {
-        // Token expired, clear it and require re-login
-        set({ accessToken: undefined })
-        setError('Access token expired. Please sign in again.')
-        return
-      }
-      if (!r.ok) throw new Error(`list_images ${r.status}`)
-      const j = await r.json()
-      set({ files: j.files })
-    } catch (e:any) {
-      setError(e?.message || 'Failed to list images')
-    } finally { setIsBusy(false) }
   }
 
-  function pickFolder() {
-    if (!accessToken) return alert('Sign in first')
-    initPicker(accessToken, async (fid) => {
-      set({ folderId: fid })
-      await listImages(fid)
-    })
-  }
-
-  // Handle drag and drop for folders
+  // Handle drag and drop for files
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault()
     setIsDragOver(true)
@@ -72,153 +54,126 @@ export default function Page() {
     e.preventDefault()
     setIsDragOver(false)
     
-    if (!accessToken) {
-      alert('Please sign in first')
-      return
+    const droppedFiles = Array.from(e.dataTransfer.files)
+    const imageFiles = droppedFiles.filter(file => file.type.startsWith('image/'))
+    
+    if (imageFiles.length !== droppedFiles.length) {
+      setError('Only image files are supported')
+    } else {
+      setError(null)
     }
-
-    // For now, just trigger the folder picker since Google Drive API doesn't support direct folder drops
-    // In the future, this could be enhanced to handle file system folders if needed
-    pickFolder()
+    
+    setFiles(imageFiles)
+    setSuggestions([]) // Clear previous results
   }
-
-  useEffect(() => {
-    if (accessToken && folderId && files.length === 0) {
-      listImages()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accessToken, folderId])
-
-  useEffect(() => {
-    if (accessToken) {
-      fetchUserCredits()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accessToken])
 
   async function aiRenameAll() {
     if (!hasFiles) return
     setIsBusy(true)
     setError(null)
+    
     try {
-      const sRes = await fetch(`${BACKEND}/suggest_names`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ access_token: accessToken, files })
+      // Create FormData for file upload
+      const formData = new FormData()
+      files.forEach(file => {
+        formData.append('files', file)
       })
-      if (sRes.status === 401) {
-        // Token expired, clear it and require re-login
-        set({ accessToken: undefined })
-        setError('Access token expired. Please sign in again.')
-        return
+      formData.append('prompt', 'Generate professional, descriptive filenames for these images')
+      
+      // Submit batch job
+      const jobResponse = await fetch(`${process.env.BACKEND_BASE}/v1/jobs/rename`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${API_KEY}`
+        },
+        body: formData
+      })
+      
+      if (!jobResponse.ok) {
+        throw new Error(`Failed to create job: ${jobResponse.status}`)
       }
-      if (sRes.status === 402) {
-        // Insufficient credits
-        const errorData = await sRes.json().catch(() => ({ detail: 'Insufficient credits' }))
-        setError(errorData.detail || 'Insufficient credits. Please purchase more credits.')
-        fetchUserCredits() // Refresh credits display
-        return
-      }
-      const s = await sRes.json()
-      set({ suggestions: s.items })
-      fetchUserCredits() // Refresh credits after successful operation
-      const errs = (s.items || []).filter((x:any)=>x.error)
-      const many401 = errs.length > 0 && errs.every((x:any)=> String(x.error).includes('Gemini error 401') || String(x.error).includes('UNAUTHENTICATED'))
-      if (many401) {
-        setError('Gemini auth failed: use a Google AI Studio (Generative Language API) key on the backend.')
-      }
-    } catch (e:any) {
+      
+      const jobData = await jobResponse.json()
+      const jobId = jobData.job_id
+      setCurrentJobId(jobId)
+      
+      // Poll for results
+      await pollJobResults(jobId)
+      
+    } catch (e: any) {
       setError(e?.message || 'AI rename failed')
-    } finally { setIsBusy(false) }
+    } finally { 
+      setIsBusy(false) 
+    }
+  }
+  
+  async function pollJobResults(jobId: string) {
+    const maxAttempts = 60 // 5 minutes max
+    let attempts = 0
+    
+    while (attempts < maxAttempts) {
+      try {
+        const response = await fetch(`${process.env.BACKEND_BASE}/v1/jobs/${jobId}/results`, {
+          headers: {
+            'Authorization': `Bearer ${API_KEY}`
+          }
+        })
+        
+        if (response.ok) {
+          const results = await response.json()
+          if (results.status === 'completed' && results.results) {
+            setSuggestions(results.results.map((r: any) => ({
+              id: r.index,
+              original: r.original,
+              suggested_name: r.suggested,
+              error: r.status === 'error' ? r.error : null
+            })))
+            setUserCredits(prev => Math.max(0, prev - files.length))
+            return
+          }
+        }
+        
+        // Wait 5 seconds before next poll
+        await new Promise(resolve => setTimeout(resolve, 5000))
+        attempts++
+        
+      } catch (e) {
+        console.error('Polling error:', e)
+        attempts++
+      }
+    }
+    
+    setError('Processing timed out. Please try again.')
   }
 
-  async function metadataRenameAll() {
-    if (!hasFiles) return
-    setIsBusy(true)
-    setError(null)
-    try {
-      const sRes = await fetch(`${BACKEND}/metadata_rename`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ access_token: accessToken, files })
-      })
-      if (sRes.status === 401) {
-        // Token expired, clear it and require re-login
-        set({ accessToken: undefined })
-        setError('Access token expired. Please sign in again.')
-        return
-      }
-      if (!sRes.ok) throw new Error(`metadata_rename ${sRes.status}`)
-      const s = await sRes.json()
-      set({ suggestions: s.items })
-    } catch (e:any) {
-      setError(e?.message || 'Metadata rename failed')
-    } finally { setIsBusy(false) }
-  }
+
 
   async function downloadAll() {
-    const items = (suggestions || []).filter((s:any)=>s.suggested_name).map((s:any)=>({ id: s.id, name: s.suggested_name }))
-    if (items.length === 0) return
-    setIsBusy(true)
-    setError(null)
-    try {
-      const r = await fetch(`${BACKEND}/download_zip`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ access_token: accessToken, items })
-      })
-      if (r.status === 401) {
-        // Token expired, clear it and require re-login
-        set({ accessToken: undefined })
-        setError('Access token expired. Please sign in again.')
-        return
-      }
-      if (!r.ok) throw new Error(`download_zip ${r.status}`)
-      const blob = await r.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = 'renamed-images.zip'
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(url)
-    } catch (e:any) {
-      setError(e?.message || 'Download failed')
-    } finally { setIsBusy(false) }
+    const validSuggestions = suggestions.filter(s => s.suggested_name && !s.error)
+    if (validSuggestions.length === 0) return
+    
+    // Create a simple text file with the rename mappings
+    const content = validSuggestions.map(s => 
+      `${s.original} -> ${s.suggested_name}`
+    ).join('\n')
+    
+    const blob = new Blob([content], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'rename-suggestions.txt'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
   }
 
   function buyCredits(amount: number) {
-    const stripeUrl = amount === 100 
-      ? 'https://buy.stripe.com/9B628r4Tz8Sd6Ci1me6oo03'
-      : 'https://buy.stripe.com/fZudR93Pv8Sd7Gmfd46oo04'
+    const stripeUrl = amount === 1000 
+      ? 'https://buy.stripe.com/4gM3cv4Tzecx3q60ia6oo05'  // $10/month -> 1k credits
+      : 'https://buy.stripe.com/4gM8wP5XDc4p2m28OG6oo06'  // $100/month -> 10k credits
     
     window.open(stripeUrl, '_blank')
-  }
-
-  async function fetchUserCredits() {
-    if (!accessToken) return
-    
-    try {
-      const response = await fetch(`${BACKEND}/user_credits`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ access_token: accessToken })
-      })
-      
-      if (response.status === 401) {
-        // Token expired, clear session
-        set({ accessToken: undefined, userCredits: undefined, userEmail: undefined })
-        setError('Access token expired. Please sign in again.')
-        return
-      }
-      
-      if (response.ok) {
-        const data = await response.json()
-        set({ userCredits: data.credits, userEmail: data.email })
-      } else {
-        console.error('Failed to fetch credits:', response.statusText)
-      }
-    } catch (error) {
-      console.error('Failed to fetch user credits:', error)
-    }
   }
 
   return (
@@ -226,50 +181,53 @@ export default function Page() {
       {/* Hero */}
       <div className="max-w-4xl mx-auto pt-16 pb-10 px-4 text-center">
         <div className="text-4xl md:text-5xl font-[var(--font-playfair)] leading-tight">
-          Renamer Drive AI
+          File Renamer AI
         </div>
-        <p className="mt-3 text-gray-600">Rename Drive photos with AI. Pick a folder to begin.</p>
+        <p className="mt-3 text-gray-600">Rename photos with AI. Pick a folder to begin.</p>
       </div>
 
       {/* Controls */}
       <div className="max-w-3xl mx-auto px-4">
         {/* Quick chips */}
         <div className="flex flex-wrap items-center gap-2 justify-center mt-4 text-sm">
-          {!accessToken && (
-            <button onClick={signIn} disabled={isBusy} className="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 disabled:opacity-50">Sign in</button>
-          )}
-          <button onClick={pickFolder} disabled={isBusy} className="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 disabled:opacity-50 flex items-center gap-2">
-            <Cloud className="w-4 h-4 text-blue-500" />
-            Pick folder
-          </button>
-          <button onClick={aiRenameAll} disabled={isBusy || !hasFiles} className="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 disabled:opacity-50">AI rename</button>
-          <button onClick={metadataRenameAll} disabled={isBusy || !hasFiles} className="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 disabled:opacity-50 flex items-center gap-2">
-            <Database className="w-4 h-4" />
-            Metadata rename
-          </button>
-          <label className="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 cursor-pointer">
-            <input type="checkbox" disabled={isBusy} checked={recursive} onChange={(e)=>setRecursive(e.target.checked)} className="mr-2"/>
-            Recursive
+          <label className="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 disabled:opacity-50 flex items-center gap-2 cursor-pointer">
+            <Upload className="w-4 h-4 text-blue-500" />
+            Select Images
+            <input 
+              type="file" 
+              multiple 
+              accept="image/*" 
+              onChange={handleFileSelect}
+              className="hidden"
+              disabled={isBusy}
+            />
           </label>
-          {accessToken && (
-            <div className="flex items-center gap-2">
-              <div className="px-3 py-1.5 rounded-full border border-green-200 bg-green-50 text-green-700">
-                {userCredits ?? '...'} credits
-              </div>
-              <button 
-                onClick={() => buyCredits(100)} 
-                className="px-3 py-1.5 rounded-full border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
-              >
-                +100 credits - $13
-              </button>
-              <button 
-                onClick={() => buyCredits(1000)} 
-                className="px-3 py-1.5 rounded-full border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
-              >
-                +1000 credits - $99
-              </button>
-            </div>
+          {hasFiles && (
+            <button onClick={clearFiles} disabled={isBusy} className="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 disabled:opacity-50">
+              Clear ({files.length})
+            </button>
           )}
+          <button onClick={aiRenameAll} disabled={isBusy || !hasFiles} className="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 disabled:opacity-50 flex items-center gap-2">
+            <SlidersHorizontal className="w-4 h-4" />
+            Rename Files
+          </button>
+          <div className="flex items-center gap-2">
+            <div className="px-3 py-1.5 rounded-full border border-green-200 bg-green-50 text-green-700">
+              {userCredits} credits
+            </div>
+            <button 
+              onClick={() => buyCredits(1000)} 
+              className="px-3 py-1.5 rounded-full border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
+            >
+              1k credits - $10/month
+            </button>
+            <button 
+              onClick={() => buyCredits(10000)} 
+              className="px-3 py-1.5 rounded-full border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
+            >
+              10k credits - $100/month
+            </button>
+          </div>
         </div>
 
         {error && (
@@ -296,19 +254,29 @@ export default function Page() {
           </div>
           
           {hasFiles ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {preview.map((f:any)=> (
-                <div key={f.id} className="border border-gray-200 rounded-xl p-4">
-                  <div className="font-medium text-gray-900 truncate">{f.name}</div>
-                  <div className="text-sm text-gray-500 mt-1">{f.mimeType}</div>
+            <div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {preview.map((file, index) => (
+                  <div key={index} className="border border-gray-200 rounded-xl p-4">
+                    <div className="font-medium text-gray-900 truncate">{file.name}</div>
+                    <div className="text-sm text-gray-500 mt-1">{file.type}</div>
+                    <div className="text-xs text-gray-400 mt-1">{(file.size / 1024).toFixed(1)} KB</div>
+                  </div>
+                ))}
+              </div>
+              {hasMoreFiles && (
+                <div className="mt-4 text-center">
+                  <div className="text-sm text-gray-500">
+                    ... and {files.length - 10} more files
+                  </div>
                 </div>
-              ))}
+              )}
             </div>
           ) : (
             <div className="text-center py-12">
               <Upload className="w-12 h-12 text-gray-400 mx-auto mb-4" />
               <div className="text-sm text-gray-500">
-                {isBusy ? 'Loading images…' : 'Drop folders here or pick a folder to load images.'}
+                {isBusy ? 'Processing images…' : 'Drop image files here or click "Select Images" to upload.'}
               </div>
             </div>
           )}
@@ -320,10 +288,10 @@ export default function Page() {
                 <button onClick={downloadAll} disabled={isBusy} className="px-3 py-1.5 rounded-lg bg-gray-900 text-white hover:bg-black disabled:opacity-50">Download all</button>
               </div>
               <ul className="space-y-2">
-                {suggestions.map((s:any)=> (
-                  <li key={s.id} className="flex items-center justify-between border rounded-lg px-4 py-2">
+                {suggestions.map((s, index) => (
+                  <li key={index} className="flex items-center justify-between border rounded-lg px-4 py-2">
                     <div className="min-w-0 flex-1">
-                      <div className="text-sm text-gray-500 truncate">{files.find((f:any)=>f.id===s.id)?.name}</div>
+                      <div className="text-sm text-gray-500 truncate">{s.original}</div>
                       <div className="font-medium text-gray-900 truncate">{s.suggested_name || s.error}</div>
                     </div>
                   </li>

@@ -8,8 +8,8 @@ const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
 const playfair = Playfair_Display({ subsets: ['latin'], variable: '--font-playfair' })
 
 export const metadata: Metadata = {
-  title: 'Renamer Drive AI',
-  description: 'Rename Google Drive photos with AI. Smart, automatic photo organization.',
+  title: 'File Renamer AI',
+  description: 'Rename photos with AI. Smart, automatic photo organization.',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
