@@ -299,7 +299,15 @@ class OptimizedVLM:
             return_tensors="pt", 
             padding=True
         )
-        inputs = {k: v.to(self.model_device) if hasattr(v, 'to') else v for k, v in inputs.items()}
+        
+        print(f"🔍 INPUTS TYPE: {type(inputs)}")
+        print(f"🔍 INPUTS KEYS: {list(inputs.keys()) if hasattr(inputs, 'keys') else 'No keys'}")
+        
+        # Move inputs to device properly
+        if isinstance(inputs, dict):
+            inputs = {k: v.to(self.model_device) if hasattr(v, 'to') else v for k, v in inputs.items()}
+        else:
+            inputs = inputs.to(self.model_device)
         
         generate_ids = self.model.generate(
             **inputs,
@@ -310,8 +318,16 @@ class OptimizedVLM:
         )
         
         # Only decode the new tokens (remove input tokens)
+        if hasattr(inputs, 'input_ids'):
+            input_ids = inputs.input_ids
+        elif isinstance(inputs, dict) and 'input_ids' in inputs:
+            input_ids = inputs['input_ids']
+        else:
+            print(f"🔍 INPUTS STRUCTURE: {inputs}")
+            raise ValueError(f"Cannot find input_ids in inputs: {type(inputs)}")
+            
         generated_ids_trimmed = [
-            out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generate_ids)
+            out_ids[len(in_ids):] for in_ids, out_ids in zip(input_ids, generate_ids)
         ]
         out = self.processor.batch_decode(generated_ids_trimmed, skip_special_tokens=True)[0]
         print(f"🔍 RAW MODEL OUTPUT: {repr(out)}")
