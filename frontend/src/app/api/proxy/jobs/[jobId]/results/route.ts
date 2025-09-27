@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 
 export const runtime = 'nodejs'
 
-export async function GET(req: NextRequest, { params }: { params: { jobId: string } }) {
+export async function GET(req: NextRequest, context: { params: Promise<{ jobId: string }> }) {
   try {
     const backendBase = process.env.RENAMER_API_BASE
     const apiKey = process.env.JOB_PERSONAL_API_KEY
@@ -11,7 +11,9 @@ export async function GET(req: NextRequest, { params }: { params: { jobId: strin
       return new Response(JSON.stringify({ error: 'Server not configured' }), { status: 500 })
     }
 
-    const upstream = await fetch(`${backendBase}/v1/jobs/${params.jobId}/results`, {
+    const { jobId } = await context.params
+
+    const upstream = await fetch(`${backendBase}/v1/jobs/${jobId}/results`, {
       headers: {
         Authorization: `Bearer ${apiKey}`
       }
