@@ -287,14 +287,31 @@ class OptimizedVLM:
 
     def _process_single_image(self, img: Image.Image, prompt: str) -> str:
         """Process single image (helper for OOM fallback)"""
-        # Direct text prompt without chat template for debugging
-        direct_text = "Describe this image in 3 words: "
+        # Use the actual user prompt with proper chat template
+        messages = [
+            {
+                "role": "system",
+                "content": system_prompt()
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": img},
+                    {"type": "text", "text": prompt if prompt else "Analyze this image and generate a descriptive filename."}
+                ]
+            }
+        ]
         
-        print(f"🔍 USING DIRECT TEXT: {repr(direct_text)}")
+        # Apply chat template
+        text = self.processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
         
-        # Process with direct text (no chat template)
+        print(f"🔍 Using user prompt: {repr(prompt)}")
+        
+        # Process with proper chat template
         inputs = self.processor(
-            text=[direct_text], 
+            text=[text], 
             images=[img], 
             return_tensors="pt", 
             padding=True
