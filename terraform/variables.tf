@@ -10,7 +10,7 @@ variable "region" {
 
 variable "instance_type" {
   type    = string
-  default = "g4dn.xlarge" # GPU-enabled for AI inference! 🚀
+  default = "g4dn.2xlarge" # GPU-enabled for AI inference! 🚀 (32GB RAM for VLM)
 }
 
 variable "ingress_cidr" {

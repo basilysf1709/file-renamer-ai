@@ -18,7 +18,7 @@ export default function Page() {
 
   function signIn() {
     const tokenClient = (window as any).google.accounts.oauth2.initTokenClient({
-      client_id: process.env.GOOGLE_CLIENT_ID!,
+      client_id: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!,
       scope: 'https://www.googleapis.com/auth/drive',
       callback: (resp: any) => resp?.access_token && set({ accessToken: resp.access_token })
     })
