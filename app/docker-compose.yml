@@ -6,6 +6,7 @@ services:
       dockerfile: Dockerfile.api
     env_file: .env
     ports: ["80:80"]
+    runtime: nvidia
     deploy:
       resources:
         reservations:
@@ -17,6 +18,7 @@ services:
       context: .
       dockerfile: Dockerfile.worker
     env_file: .env
+    runtime: nvidia
     deploy:
       resources:
         reservations:
