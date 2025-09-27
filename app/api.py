@@ -30,9 +30,22 @@ app = FastAPI(title="Renamer AI API")
 async def startup_event():
     """Initialize VLM model at startup for optimal performance"""
     global vlm_instance
+    import os
+    
+    # Skip model loading in testing/minimal environments
+    if os.getenv("SKIP_MODEL_LOAD", "").lower() in ("true", "1"):
+        print("⚠️ Skipping VLM model loading (SKIP_MODEL_LOAD=true)")
+        vlm_instance = None
+        return
+        
     print("🤖 Loading VLM model at startup...")
-    vlm_instance = get_vlm()
-    print("✅ VLM model loaded successfully - API ready!")
+    try:
+        vlm_instance = get_vlm()
+        print("✅ VLM model loaded successfully - API ready!")
+    except Exception as e:
+        print(f"❌ Failed to load VLM model: {e}")
+        print("⚠️ API starting without VLM model - inference will fail")
+        vlm_instance = None
 
 @app.on_event("shutdown")
 async def shutdown_event():
