@@ -67,6 +67,23 @@ export default function Page() {
     setSuggestions([]) // Clear previous results
   }
 
+  async function previewFirst() {
+    if (files.length === 0) return
+    setIsBusy(true)
+    setError(null)
+    try {
+      const formData = new FormData()
+      formData.append('file', files[0])
+      formData.append('prompt', 'Generate a short, descriptive filename that captures the main subject and context')
+      const r = await fetch('/api/proxy/preview', { method: 'POST', body: formData })
+      if (!r.ok) throw new Error(`preview ${r.status}`)
+      const j = await r.json()
+      setSuggestions([{ original: j.original, suggested_name: j.suggested }])
+    } catch (e: any) {
+      setError(e?.message || 'Preview failed')
+    } finally { setIsBusy(false) }
+  }
+
   async function aiRenameAll() {
     if (!hasFiles) return
     setIsBusy(true)
@@ -81,11 +98,8 @@ export default function Page() {
       formData.append('prompt', 'Generate professional, descriptive filenames for these images')
       
       // Submit batch job
-      const jobResponse = await fetch(`${process.env.BACKEND_BASE}/v1/jobs/rename`, {
+      const jobResponse = await fetch(`/api/proxy/jobs/rename`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${API_KEY}`
-        },
         body: formData
       })
       
@@ -113,11 +127,7 @@ export default function Page() {
     
     while (attempts < maxAttempts) {
       try {
-        const response = await fetch(`${process.env.BACKEND_BASE}/v1/jobs/${jobId}/results`, {
-          headers: {
-            'Authorization': `Bearer ${API_KEY}`
-          }
-        })
+        const response = await fetch(`/api/proxy/jobs/${jobId}/results`)
         
         if (response.ok) {
           const results = await response.json()
@@ -149,23 +159,37 @@ export default function Page() {
 
 
   async function downloadAll() {
-    const validSuggestions = suggestions.filter(s => s.suggested_name && !s.error)
-    if (validSuggestions.length === 0) return
-    
-    // Create a simple text file with the rename mappings
-    const content = validSuggestions.map(s => 
-      `${s.original} -> ${s.suggested_name}`
-    ).join('\n')
-    
-    const blob = new Blob([content], { type: 'text/plain' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'rename-suggestions.txt'
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    URL.revokeObjectURL(url)
+    const valid = suggestions.filter(s => s.suggested_name && !s.error)
+    if (valid.length === 0) return
+
+    // Download each original image with the new suggested filename
+    for (const s of valid) {
+      // Try to map suggestion to a file: prefer index id if available
+      let file: File | undefined
+      if (typeof (s as any).id === 'number' && files[(s as any).id]) {
+        file = files[(s as any).id]
+      } else {
+        file = files.find(f => f.name === s.original)
+      }
+      if (!file) continue
+
+      // Preserve original extension
+      const extFromName = file.name.includes('.') ? file.name.split('.').pop() : undefined
+      const ext = extFromName || (file.type.split('/')[1] || 'jpg')
+      const newName = `${s.suggested_name}.${ext}`
+
+      const url = URL.createObjectURL(file)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = newName
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+
+      // Small delay to avoid some browsers blocking rapid downloads
+      await new Promise(r => setTimeout(r, 50))
+    }
   }
 
   function buyCredits(amount: number) {
@@ -207,6 +231,10 @@ export default function Page() {
               Clear ({files.length})
             </button>
           )}
+          <button onClick={previewFirst} disabled={isBusy || !hasFiles} className="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 disabled:opacity-50 flex items-center gap-2">
+            <SlidersHorizontal className="w-4 h-4" />
+            Preview First
+          </button>
           <button onClick={aiRenameAll} disabled={isBusy || !hasFiles} className="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 disabled:opacity-50 flex items-center gap-2">
             <SlidersHorizontal className="w-4 h-4" />
             Rename Files
