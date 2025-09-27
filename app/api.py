@@ -32,6 +32,13 @@ async def startup_event():
     global vlm_instance
     import os
     
+    # Temporarily disable model loading to fix memory issues
+    # TODO: Re-enable once memory optimization is complete
+    print("⚠️ VLM model loading temporarily disabled due to memory constraints")
+    print("📋 API will start without inference capabilities")
+    vlm_instance = None
+    return
+    
     # Skip model loading in testing/minimal environments
     if os.getenv("SKIP_MODEL_LOAD", "").lower() in ("true", "1"):
         print("⚠️ Skipping VLM model loading (SKIP_MODEL_LOAD=true)")
