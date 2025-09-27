@@ -214,10 +214,14 @@ class OptimizedVLM:
                 for img in batch_imgs:
                     messages = [
                         {
+                            "role": "system",
+                            "content": system_prompt()
+                        },
+                        {
                             "role": "user",
                             "content": [
                                 {"type": "image", "image": img},
-                                {"type": "text", "text": full_prompt}
+                                {"type": "text", "text": user_prompt if user_prompt else "Analyze this image and generate a descriptive filename."}
                             ]
                         }
                     ]
@@ -283,13 +287,17 @@ class OptimizedVLM:
 
     def _process_single_image(self, img: Image.Image, prompt: str) -> str:
         """Process single image (helper for OOM fallback)"""
-        # Create proper chat format for Qwen2-VL
+        # Create proper chat format for Qwen2-VL with separate system message
         messages = [
+            {
+                "role": "system",
+                "content": system_prompt()
+            },
             {
                 "role": "user",
                 "content": [
                     {"type": "image", "image": img},
-                    {"type": "text", "text": prompt}
+                    {"type": "text", "text": prompt if prompt else "Analyze this image and generate a descriptive filename."}
                 ]
             }
         ]
