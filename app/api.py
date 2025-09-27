@@ -103,18 +103,26 @@ async def health():
 @app.post("/v1/preview")
 async def preview_rename(file: UploadFile = File(...), prompt: str = Body("", embed=True)):
     """Fast preview endpoint with pre-loaded model"""
+    print(f"🔍 PREVIEW ENDPOINT called with file: {file.filename}, prompt: {repr(prompt)}")
     try:
         # Check if model is ready
         if vlm_instance is None:
+            print("❌ VLM instance is None")
             raise HTTPException(status_code=503, detail="Model not ready yet, please wait")
+        
+        print(f"🔍 VLM instance ready, id: {id(vlm_instance)}")
         
         # Read file
         image_bytes = await file.read()
+        print(f"🔍 Image read, size: {len(image_bytes)} bytes")
         
         # Process with pre-loaded model (much faster!)
         start_time = time.time()
+        print(f"🔍 Calling vlm_instance.predict_single...")
         suggested_name = vlm_instance.predict_single(image_bytes, prompt)
         processing_time = time.time() - start_time
+        
+        print(f"🔍 PREVIEW ENDPOINT returning: {repr(suggested_name)}")
         
         return {
             "original": file.filename,
@@ -122,6 +130,7 @@ async def preview_rename(file: UploadFile = File(...), prompt: str = Body("", em
             "processing_time_ms": int(processing_time * 1000)
         }
     except Exception as e:
+        print(f"❌ PREVIEW ENDPOINT error: {e}")
         raise HTTPException(status_code=400, detail=f"Preview failed: {str(e)}")
 
 @app.post("/v1/jobs/rename")
