@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     sqs_queue_url: str
     model_id: str = "Qwen/Qwen2-VL-2B-Instruct"
     max_pixels: int = 786432  # ~0.75MP
-    max_new_tokens: int = 15
+    max_new_tokens: int = 50
     batch_size: int = 16  # Optimized for 8-bit quantization
     api_port: int = 80
     
