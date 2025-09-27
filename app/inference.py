@@ -203,13 +203,35 @@ class OptimizedVLM:
         
         for i in range(0, len(imgs), dynamic_batch_size):
             batch_imgs = imgs[i:i + dynamic_batch_size]
-            prompts = [system_prompt() + (f" {user_prompt}" if user_prompt else "")] * len(batch_imgs)
+            full_prompt = system_prompt() + (f" {user_prompt}" if user_prompt else "")
             
             print(f"🔄 Processing batch {i//dynamic_batch_size + 1}/{(len(imgs) + dynamic_batch_size - 1)//dynamic_batch_size}")
             
             # Process batch with proper memory management
             try:
-                inputs = self.processor(text=prompts, images=batch_imgs, return_tensors="pt", padding=True)
+                # Create proper chat messages for each image
+                batch_messages = []
+                for img in batch_imgs:
+                    messages = [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "image", "image": img},
+                                {"type": "text", "text": full_prompt}
+                            ]
+                        }
+                    ]
+                    batch_messages.append(messages)
+                
+                # Apply chat template for each message set
+                texts = []
+                for messages in batch_messages:
+                    text = self.processor.apply_chat_template(
+                        messages, tokenize=False, add_generation_prompt=True
+                    )
+                    texts.append(text)
+                
+                inputs = self.processor(text=texts, images=batch_imgs, return_tensors="pt", padding=True)
                 
                 # Move to correct device (handle device_map scenarios)
                 inputs = {k: v.to(self.model_device) if hasattr(v, 'to') else v for k, v in inputs.items()}
@@ -222,7 +244,11 @@ class OptimizedVLM:
                     pad_token_id=self.processor.tokenizer.eos_token_id
                 )
                 
-                batch_results = self.processor.batch_decode(generate_ids, skip_special_tokens=True)
+                # Only decode the new tokens (remove input tokens)
+                generated_ids_trimmed = [
+                    out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generate_ids)
+                ]
+                batch_results = self.processor.batch_decode(generated_ids_trimmed, skip_special_tokens=True)
                 all_results.extend([to_kebab(o) for o in batch_results])
                 
                 print(f"✅ Batch {i//dynamic_batch_size + 1} completed")
@@ -257,7 +283,29 @@ class OptimizedVLM:
 
     def _process_single_image(self, img: Image.Image, prompt: str) -> str:
         """Process single image (helper for OOM fallback)"""
-        inputs = self.processor(text=[prompt], images=[img], return_tensors="pt", padding=True)
+        # Create proper chat format for Qwen2-VL
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": img},
+                    {"type": "text", "text": prompt}
+                ]
+            }
+        ]
+        
+        # Apply chat template
+        text = self.processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        
+        # Process with proper format
+        inputs = self.processor(
+            text=[text], 
+            images=[img], 
+            return_tensors="pt", 
+            padding=True
+        )
         inputs = {k: v.to(self.model_device) if hasattr(v, 'to') else v for k, v in inputs.items()}
         
         generate_ids = self.model.generate(
@@ -268,7 +316,11 @@ class OptimizedVLM:
             pad_token_id=self.processor.tokenizer.eos_token_id
         )
         
-        out = self.processor.batch_decode(generate_ids, skip_special_tokens=True)[0]
+        # Only decode the new tokens (remove input tokens)
+        generated_ids_trimmed = [
+            out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generate_ids)
+        ]
+        out = self.processor.batch_decode(generated_ids_trimmed, skip_special_tokens=True)[0]
         return to_kebab(out)
 
     @torch.inference_mode()
