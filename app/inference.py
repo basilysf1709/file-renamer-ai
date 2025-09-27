@@ -335,9 +335,13 @@ class OptimizedVLM:
     @torch.inference_mode()
     def predict_single(self, image_bytes: bytes, user_prompt: str) -> str:
         """Optimized single image processing for preview endpoint"""
+        print(f"🔍 PREDICT_SINGLE called with prompt: {repr(user_prompt)}")
         img = self.preprocess_img(image_bytes)
+        print(f"🔍 Image preprocessed, size: {img.size}")
         try:
-            return self._process_single_image(img, user_prompt)
+            result = self._process_single_image(img, user_prompt)
+            print(f"🔍 PREDICT_SINGLE returning: {repr(result)}")
+            return result
         except torch.cuda.OutOfMemoryError:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
