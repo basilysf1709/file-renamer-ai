@@ -100,6 +100,19 @@ async def health():
         "model_loaded": vlm_ready
     }
 
+@app.get("/debug/test")
+async def debug_test():
+    """Simple test endpoint to verify code updates are working"""
+    import time
+    import os
+    return {
+        "message": "Debug endpoint working",
+        "timestamp": time.time(),
+        "container_id": os.environ.get("HOSTNAME", "unknown"),
+        "git_commit": "1021e31",
+        "debug_flag": "WORKING"
+    }
+
 @app.post("/v1/preview")
 async def preview_rename(file: UploadFile = File(...), prompt: str = Body("", embed=True)):
     """Fast preview endpoint with pre-loaded model"""
