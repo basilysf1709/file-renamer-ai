@@ -3,8 +3,11 @@ set -euxo pipefail
 
 # NVIDIA drivers & Docker
 apt-get update -y
-apt-get install -y docker.io docker-compose python3-pip unzip git jq awscli
+apt-get install -y docker.io docker-compose python3-pip unzip git jq awscli ubuntu-drivers-common
 usermod -aG docker ubuntu || true
+
+# Install NVIDIA drivers first
+ubuntu-drivers autoinstall
 
 # Install NVIDIA container toolkit (for GPU)
 distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
@@ -15,6 +18,13 @@ curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-
 apt-get update -y
 apt-get install -y nvidia-container-toolkit
 nvidia-ctk runtime configure --runtime=docker || true
+
+# Reboot to load NVIDIA drivers (only on first boot)
+if [ ! -f /var/lib/cloud/instance/nvidia-drivers-installed ]; then
+  touch /var/lib/cloud/instance/nvidia-drivers-installed
+  reboot
+fi
+
 systemctl restart docker
 
 # Pull app repo
