@@ -287,17 +287,15 @@ class OptimizedVLM:
 
     def _process_single_image(self, img: Image.Image, prompt: str) -> str:
         """Process single image (helper for OOM fallback)"""
-        # Create proper chat format for Qwen2-VL with separate system message
+        # Simplified prompt for debugging
+        user_text = prompt if prompt else "Generate a descriptive filename for this image in kebab-case format (e.g., 'red-car-on-street'). Return only the filename, no extension."
+        
         messages = [
-            {
-                "role": "system",
-                "content": system_prompt()
-            },
             {
                 "role": "user",
                 "content": [
                     {"type": "image", "image": img},
-                    {"type": "text", "text": prompt if prompt else "Analyze this image and generate a descriptive filename."}
+                    {"type": "text", "text": user_text}
                 ]
             }
         ]
