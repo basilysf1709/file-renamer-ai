@@ -61,8 +61,7 @@ class OptimizedVLM:
             device_map="auto" if quantization_config else None,
             # Additional memory optimizations
             max_memory={0: "13GB", "cpu": "30GB"} if self.device == "cuda" else {"cpu": "15GB"},
-            offload_folder="./model_offload" if self.device == "cuda" else None,
-            torch_compile=False  # Disable torch.compile to save memory
+            offload_folder="./model_offload" if self.device == "cuda" else None
         )
         
         # Only move to device if not using quantization (device_map handles it)
