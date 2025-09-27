@@ -13,7 +13,6 @@ import io
 aws_config = Config(
     retries={'max_attempts': 3},
     max_pool_connections=50,
-    max_bandwidth=1024 * 1024 * 100,  # 100 MB/s
     tcp_keepalive=True
 )
 
