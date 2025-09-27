@@ -327,7 +327,10 @@ class OptimizedVLM:
             out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generate_ids)
         ]
         out = self.processor.batch_decode(generated_ids_trimmed, skip_special_tokens=True)[0]
-        return to_kebab(out)
+        print(f"🔍 RAW MODEL OUTPUT: {repr(out)}")
+        result = to_kebab(out)
+        print(f"🔍 AFTER TO_KEBAB: {repr(result)}")
+        return result
 
     @torch.inference_mode()
     def predict_single(self, image_bytes: bytes, user_prompt: str) -> str:
