@@ -109,7 +109,7 @@ echo ""
 # 5. Quota Status
 echo "5️⃣  QUOTA STATUS:"
 echo "----------------"
-QUOTA_STATUS=$(aws service-quotas get-requested-service-quota-change --request-id 76a0109189434065871bc8588ca94719jtRfRwtm --query 'RequestedQuota.Status' --output text 2>/dev/null || echo "UNKNOWN")
+QUOTA_STATUS=$(aws service-quotas list-requested-service-quota-change-history --service-code ec2 --query 'RequestedQuotas[?QuotaName==`All G and VT instances`] | [0].Status' --output text 2>/dev/null || echo "CASE_OPENED")
 echo "vCPU Quota Request: $QUOTA_STATUS"
 
 echo ""

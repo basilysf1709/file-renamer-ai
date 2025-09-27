@@ -233,7 +233,7 @@ resource "aws_autoscaling_group" "asg" {
   max_size                  = 1  # Limit to 1 instance to stay within vCPU quota
   min_size                  = 1  # Minimum instances to keep running
   vpc_zone_identifier       = data.aws_subnets.default.ids
-  health_check_grace_period = 300 # Wait longer for health checks
+  health_check_grace_period = 1200 # Wait 20 minutes for health checks
   health_check_type         = "ELB" # Use ALB health checks
   
   launch_template {
@@ -322,10 +322,10 @@ resource "aws_lb_target_group" "api" {
 
   health_check {
     enabled             = true
-    healthy_threshold   = 2
-    unhealthy_threshold = 2
-    timeout             = 5
-    interval            = 30
+    healthy_threshold   = 3
+    unhealthy_threshold = 10
+    timeout             = 30
+    interval            = 60
     path                = "/health"
     matcher             = "200"
     port                = "traffic-port"

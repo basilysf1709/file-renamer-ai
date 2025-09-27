@@ -21,7 +21,7 @@ variable "ingress_cidr" {
 variable "key_name" {
   description = "EC2 Key Pair name for SSH access"
   type        = string
-  default     = null
+  default     = "renamer-ai-key"
 }
 
 variable "github_token" {
