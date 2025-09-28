@@ -93,6 +93,7 @@ export default function LoginPage() {
         {error && <div className="mb-3 text-red-600 text-sm">{error}</div>}
 
         <div className="space-y-3">
+          {/*
           <input
             className="w-full border rounded-md px-3 py-2 text-sm"
             type="email" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)}
@@ -106,9 +107,10 @@ export default function LoginPage() {
             <button onClick={signUpEmail} disabled={loading} className="flex-1 px-3 py-2 rounded-md border">Sign up</button>
           </div>
           <button onClick={resetPassword} disabled={loading || !email} className="text-xs text-gray-600 hover:underline text-left">Forgot password?</button>
+          */}
           <div className="h-px bg-gray-200 my-2" />
           <button onClick={signInWithGoogle} disabled={loading} className="w-full px-3 py-2 rounded-md border">Continue with Google</button>
-          <button onClick={signOut} disabled={loading} className="w-full px-3 py-2 rounded-md border">Sign out</button>
+          {/* <button onClick={signOut} disabled={loading} className="w-full px-3 py-2 rounded-md border">Sign out</button> */}
         </div>
       </div>
     </div>
