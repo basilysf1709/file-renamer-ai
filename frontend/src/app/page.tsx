@@ -123,34 +123,30 @@ export default function Page() {
     setIsDragOver(false)
     try {
       const dt = e.dataTransfer
+      // Always start with plain files from the drop for multi-file support
+      const baseFiles = Array.from(dt.files || []).filter(f => f.type.startsWith('image/'))
+
+      let collected: File[] = [...baseFiles]
       const items = Array.from(dt.items || [])
-      let collected: File[] = []
+      // Add any images discovered via directory traversal
       if (items.length && (items[0] as any).webkitGetAsEntry) {
-        // Traverse directory entries
+        const extra: File[] = []
         for (const it of items) {
           if (it.kind !== 'file') continue
           const entry = (it as any).webkitGetAsEntry()
-          if (entry) {
+          if (entry && entry.isDirectory) {
             const files = await traverseEntry(entry)
-            collected.push(...files)
-          } else {
-            const f = it.getAsFile()
-            if (f && f.type.startsWith('image/')) collected.push(f)
+            extra.push(...files)
           }
-          if (collected.length >= MAX_FILES) break
         }
-        // Also include plain files to handle multi-file drops where entries may miss some
-        const basicFiles = Array.from(dt.files || []).filter(f => f.type.startsWith('image/'))
+        // Dedupe by name+size+lastModified
         const seen = new Set(collected.map(f => `${f.name}:${f.size}:${(f as any).lastModified || 0}`))
-        for (const f of basicFiles) {
+        for (const f of extra) {
           const key = `${f.name}:${f.size}:${(f as any).lastModified || 0}`
           if (!seen.has(key)) collected.push(f)
         }
-      } else {
-        // Fallback: plain files (no recursion)
-        const droppedFiles = Array.from(dt.files || [])
-        collected = droppedFiles.filter(file => file.type.startsWith('image/'))
       }
+
       if (collected.length === 0) {
         setError('No images found in the dropped folder')
         return
