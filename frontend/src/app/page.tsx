@@ -148,13 +148,15 @@ export default function Page() {
         setError('No images found in the dropped folder')
         return
       }
-      if (collected.length > MAX_FILES) {
-        collected = collected.slice(0, MAX_FILES)
+      // Merge with existing selection and enforce cap
+      let merged = [...files, ...collected]
+      if (merged.length > MAX_FILES) {
+        merged = merged.slice(0, MAX_FILES)
         setError(`You can upload up to ${MAX_FILES} images at a time. Using the first ${MAX_FILES}.`)
       } else {
         setError(null)
       }
-      setFiles(collected)
+      setFiles(merged)
       setSuggestions([])
     } catch (err: any) {
       setError(err?.message || 'Failed to read dropped folder')
