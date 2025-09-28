@@ -67,13 +67,22 @@ export default function LoginPage() {
 
   async function signInWithGoogle() {
     setLoading(true); setMessage(null); setError(null)
-    const redirectTo = typeof window !== 'undefined'
-      ? ((window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-          ? 'http://localhost:3000/'
-          : `${window.location.origin}/`)
-      : undefined
-    const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo } })
-    if (error) handleAuthError(error)
+    const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    try { console.log('[auth] signInWithGoogle init', { host: typeof window !== 'undefined' ? window.location.host : 'ssr', mode: isLocal ? 'localhost-redirect' : 'default-callback' }) } catch {}
+    let err: any = null
+    if (isLocal) {
+      const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: 'http://localhost:3000/' } })
+      err = error
+    } else {
+      const { error } = await supabase.auth.signInWithOAuth({ provider: 'google' })
+      err = error
+    }
+    if (err) {
+      try { console.error('[auth] Google sign-in error', err.message) } catch {}
+      handleAuthError(err)
+    } else {
+      try { console.log('[auth] Google OAuth initiated') } catch {}
+    }
     setLoading(false)
   }
 

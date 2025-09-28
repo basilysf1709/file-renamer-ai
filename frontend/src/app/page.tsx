@@ -36,7 +36,9 @@ export default function Page() {
     let unsub: any
     ;(async () => {
       const { data } = await supabase.auth.getSession()
+      try { console.log('[auth] getSession', { hasSession: !!data.session, user: data.session?.user?.email }) } catch {}
       if (!data.session) {
+        try { console.warn('[auth] no session, redirecting to /login') } catch {}
         if (typeof window !== 'undefined') window.location.href = '/login'
         return
       }
@@ -44,10 +46,14 @@ export default function Page() {
       // Fetch credits
       const creditsRes = await fetch('/api/credits', {
         headers: { Authorization: `Bearer ${data.session.access_token}` }
-      }).then(r=>r.ok?r.json():{ credits: userCredits }).catch(()=>({ credits: userCredits }))
+      }).then(r=>{
+        try { console.log('[auth] /api/credits status', r.status) } catch {}
+        return r.ok ? r.json() : { credits: userCredits }
+      }).catch((e)=>{ try { console.error('[auth] /api/credits error', e?.message) } catch {}; return { credits: userCredits } })
       if (typeof creditsRes?.credits === 'number') setUserCredits(creditsRes.credits)
 
       unsub = supabase.auth.onAuthStateChange(async (_event, session) => {
+        try { console.log('[auth] onAuthStateChange', { hasSession: !!session }) } catch {}
         if (!session && typeof window !== 'undefined') window.location.href = '/login'
       })
     })()
