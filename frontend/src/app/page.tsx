@@ -5,6 +5,7 @@ import { Plus, SlidersHorizontal, Image as ImageIcon, Upload, Database, FolderOp
 import JSZip from 'jszip'
 import { supabase } from '../lib/supabaseClient'
 import { useRef } from 'react'
+import { DotLottieReact } from '@lottiefiles/dotlottie-react'
 
 
 const API_KEY = process.env.JOB_PERSONAL_API_KEY
@@ -271,12 +272,16 @@ export default function Page() {
         if (r.ok) {
           const results = await r.json()
           if (results.status === 'completed' && results.results) {
-            setSuggestions(results.results.map((x: any) => ({
-              id: x.index,
-              original: x.original,
-              suggested_name: x.suggested,
-              error: x.status === 'error' ? normalizeModelError(x.error) : null
-            })))
+            setSuggestions(results.results.map((x: any) => {
+              const errRaw = x?.error ?? x?.message ?? x?.detail ?? x?.err ?? null
+              const isError = String(x?.status || '').toLowerCase() === 'error' || String(x?.status || '').toLowerCase() === 'failed' || (!!errRaw && !x?.suggested)
+              return {
+                id: x.index,
+                original: x.original,
+                suggested_name: isError ? '' : x.suggested,
+                error: isError ? normalizeModelError(errRaw) : null
+              }
+            }))
             // decrement credits server-side
             const { data } = await supabase.auth.getSession()
             const token = data.session?.access_token
@@ -375,7 +380,18 @@ export default function Page() {
   }
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-white relative">
+      {isBusy && (
+        <div className="fixed inset-0 z-50 bg-white/70 backdrop-blur-sm flex items-center justify-center pointer-events-auto">
+          <div className="w-56 h-56">
+            <DotLottieReact
+              src="https://lottie.host/b3e57fa4-ffff-4b11-bf4b-6fe8708873aa/9KH2UTjItb.lottie"
+              loop
+              autoplay
+            />
+          </div>
+        </div>
+      )}
       {!authReady ? (
         <div className="max-w-4xl mx-auto pt-24 px-4 text-center text-sm text-gray-500">Checking authentication…</div>
       ) : (
@@ -521,7 +537,11 @@ export default function Page() {
                   <li key={index} className="flex items-center justify-between border rounded-lg px-4 py-2">
                     <div className="min-w-0 flex-1">
                       <div className="text-sm text-gray-500 truncate">{s.original}</div>
-                      <div className="font-medium text-gray-900 truncate">{s.suggested_name || s.error}</div>
+                      {s.error ? (
+                        <div className="font-medium text-red-600 truncate">{s.error}</div>
+                      ) : (
+                        <div className="font-medium text-gray-900 truncate">{s.suggested_name}</div>
+                      )}
                     </div>
                   </li>
                 ))}
