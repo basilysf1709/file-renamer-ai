@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Plus, SlidersHorizontal, Image as ImageIcon, Upload, Database, FolderOpen, Cloud, Cog } from 'lucide-react'
 import JSZip from 'jszip'
 import { supabase } from '../lib/supabaseClient'
+import { useRef } from 'react'
 
 
 const API_KEY = process.env.JOB_PERSONAL_API_KEY
@@ -22,9 +23,15 @@ export default function Page() {
   const hasMoreFiles = files.length > 10
   const [authReady, setAuthReady] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
 
   useEffect(() => {
+    // allow directory selection on browsers that support it
+    if (fileInputRef.current) {
+      try { fileInputRef.current.setAttribute('webkitdirectory', '') } catch {}
+      try { fileInputRef.current.setAttribute('directory', '') } catch {}
+    }
     let unsub: any
     ;(async () => {
       const { data } = await supabase.auth.getSession()
@@ -78,21 +85,65 @@ export default function Page() {
     setIsDragOver(false)
   }
 
-  const handleDrop = (e: React.DragEvent) => {
+  // Utilities for recursive folder traversal via drag & drop (webkit entries)
+  const readFileFromEntry = (fileEntry: any) => new Promise<File>((resolve, reject) => fileEntry.file(resolve, reject))
+  const readEntries = (dirReader: any) => new Promise<any[]>((resolve) => dirReader.readEntries((entries: any[]) => resolve(entries), () => resolve([])))
+  const traverseEntry = async (entry: any): Promise<File[]> => {
+    if (!entry) return []
+    if (entry.isFile) {
+      try { const f = await readFileFromEntry(entry); return f.type.startsWith('image/') ? [f] : [] } catch { return [] }
+    }
+    if (entry.isDirectory) {
+      const reader = entry.createReader()
+      const out: File[] = []
+      while (true) {
+        const entries = await readEntries(reader)
+        if (!entries || entries.length === 0) break
+        for (const e of entries) {
+          const sub = await traverseEntry(e)
+          out.push(...sub)
+        }
+      }
+      return out
+    }
+    return []
+  }
+
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault()
     setIsDragOver(false)
-    
-    const droppedFiles = Array.from(e.dataTransfer.files)
-    const imageFiles = droppedFiles.filter(file => file.type.startsWith('image/'))
-    
-    if (imageFiles.length !== droppedFiles.length) {
-      setError('Only image files are supported')
-    } else {
+    try {
+      const dt = e.dataTransfer
+      const items = Array.from(dt.items || [])
+      let collected: File[] = []
+      if (items.length && (items[0] as any).webkitGetAsEntry) {
+        // Traverse directory entries
+        for (const it of items) {
+          if (it.kind !== 'file') continue
+          const entry = (it as any).webkitGetAsEntry()
+          if (entry) {
+            const files = await traverseEntry(entry)
+            collected.push(...files)
+          } else {
+            const f = it.getAsFile()
+            if (f && f.type.startsWith('image/')) collected.push(f)
+          }
+        }
+      } else {
+        // Fallback: plain files (no recursion)
+        const droppedFiles = Array.from(dt.files || [])
+        collected = droppedFiles.filter(file => file.type.startsWith('image/'))
+      }
+      if (collected.length === 0) {
+        setError('No images found in the dropped folder')
+        return
+      }
       setError(null)
+      setFiles(collected)
+      setSuggestions([])
+    } catch (err: any) {
+      setError(err?.message || 'Failed to read dropped folder')
     }
-    
-    setFiles(imageFiles)
-    setSuggestions([]) // Clear previous results
   }
 
   async function previewFirst() {
@@ -307,6 +358,7 @@ export default function Page() {
               onChange={handleFileSelect}
               className="hidden"
               disabled={isBusy}
+              ref={fileInputRef}
             />
           </label>
           {hasFiles && (
