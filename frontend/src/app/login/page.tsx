@@ -88,7 +88,7 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center p-6 bg-white">
       <div className="w-full max-w-md border rounded-2xl p-6">
-        <div className="text-xl font-medium mb-4">Sign in</div>
+        {/* <div className="text-xl font-medium mb-4">Sign in</div> */}
         {message && <div className="mb-3 text-green-600 text-sm">{message}</div>}
         {error && <div className="mb-3 text-red-600 text-sm">{error}</div>}
 
