@@ -3,7 +3,7 @@ import { useSession } from '@/store/useSession'
 import { useEffect, useMemo, useState } from 'react'
 import { Plus, SlidersHorizontal, Image as ImageIcon, Upload, Database, FolderOpen, Cloud, Cog } from 'lucide-react'
 import JSZip from 'jszip'
-import { supabase } from '@/lib/supabaseClient'
+import { supabase } from '../lib/supabaseClient'
 
 
 const API_KEY = process.env.JOB_PERSONAL_API_KEY
