@@ -29,6 +29,9 @@ wheels/
 *.egg
 MANIFEST
 
+# Allow frontend src lib
+!frontend/src/lib/
+
 # Virtual environments
 .env
 .venv
