@@ -1,7 +1,9 @@
 'use client'
 import { useSession } from '@/store/useSession'
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, SlidersHorizontal, Image as ImageIcon, Upload, Database, FolderOpen, Cloud } from 'lucide-react'
+import { Plus, SlidersHorizontal, Image as ImageIcon, Upload, Database, FolderOpen, Cloud, Cog } from 'lucide-react'
+import JSZip from 'jszip'
+import { supabase } from '@/lib/supabaseClient'
 
 
 const API_KEY = process.env.JOB_PERSONAL_API_KEY
@@ -14,9 +16,35 @@ export default function Page() {
   const [error, setError] = useState<string | null>(null)
   const [isDragOver, setIsDragOver] = useState(false)
   const [currentJobId, setCurrentJobId] = useState<string | null>(null)
+  const [progress, setProgress] = useState<{jobId?: string; completed: number; total: number; percent: number; latest?: any[]}>({ completed: 0, total: 0, percent: 0 })
   const hasFiles = files.length > 0
   const preview = useMemo(()=> files.slice(0, 10), [files])
   const hasMoreFiles = files.length > 10
+  const [authReady, setAuthReady] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+
+
+  useEffect(() => {
+    let unsub: any
+    ;(async () => {
+      const { data } = await supabase.auth.getSession()
+      if (!data.session) {
+        if (typeof window !== 'undefined') window.location.href = '/login'
+        return
+      }
+      setAuthReady(true)
+      // Fetch credits
+      const creditsRes = await fetch('/api/credits', {
+        headers: { Authorization: `Bearer ${data.session.access_token}` }
+      }).then(r=>r.ok?r.json():{ credits: userCredits }).catch(()=>({ credits: userCredits }))
+      if (typeof creditsRes?.credits === 'number') setUserCredits(creditsRes.credits)
+
+      unsub = supabase.auth.onAuthStateChange(async (_event, session) => {
+        if (!session && typeof window !== 'undefined') window.location.href = '/login'
+      })
+    })()
+    return () => { if (unsub && unsub.subscription) unsub.subscription.unsubscribe() }
+  }, [])
 
   function handleFileSelect(event: React.ChangeEvent<HTMLInputElement>) {
     const selectedFiles = Array.from(event.target.files || [])
@@ -84,75 +112,86 @@ export default function Page() {
     } finally { setIsBusy(false) }
   }
 
-  async function aiRenameAll() {
+  async function aiRenameAllWithPrompt(userPrompt: string) {
     if (!hasFiles) return
     setIsBusy(true)
     setError(null)
+    setProgress({ completed: 0, total: files.length, percent: 0 })
     
     try {
-      // Create FormData for file upload
       const formData = new FormData()
-      files.forEach(file => {
-        formData.append('files', file)
-      })
-      formData.append('prompt', 'Generate professional, descriptive filenames for these images')
-      
-      // Submit batch job
-      const jobResponse = await fetch(`/api/proxy/jobs/rename`, {
-        method: 'POST',
-        body: formData
-      })
-      
-      if (!jobResponse.ok) {
-        throw new Error(`Failed to create job: ${jobResponse.status}`)
-      }
-      
+      files.forEach(file => formData.append('files', file))
+      formData.append('prompt', userPrompt)
+      const jobResponse = await fetch(`/api/proxy/jobs/rename`, { method: 'POST', body: formData })
+      if (!jobResponse.ok) throw new Error(`Failed to create job: ${jobResponse.status}`)
       const jobData = await jobResponse.json()
       const jobId = jobData.job_id
       setCurrentJobId(jobId)
-      
-      // Poll for results
-      await pollJobResults(jobId)
-      
+      setProgress(p => ({ ...p, jobId }))
+      await pollJobWithProgress(jobId)
     } catch (e: any) {
       setError(e?.message || 'AI rename failed')
-    } finally { 
-      setIsBusy(false) 
+    } finally {
+      setIsBusy(false)
     }
   }
+
+  async function aiRenameAll() {
+    await aiRenameAllWithPrompt('Generate professional, descriptive filenames for these images')
+  }
   
-  async function pollJobResults(jobId: string) {
-    const maxAttempts = 60 // 5 minutes max
+  async function pollJobWithProgress(jobId: string) {
+    const maxAttempts = 120 // up to 10 minutes
     let attempts = 0
     
     while (attempts < maxAttempts) {
       try {
-        const response = await fetch(`/api/proxy/jobs/${jobId}/results`)
+        // progress
+        const p = await fetch(`/api/proxy/jobs/${jobId}/progress`)
+        if (p.ok) {
+          const pj = await p.json()
+          setProgress(prev => {
+            const prevTotal = prev?.total || files.length
+            const total = pj.total && pj.total > 0 ? pj.total : prevTotal
+            const completed = Math.max(prev?.completed || 0, pj?.completed || 0)
+            const percent = total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : 0
+            return { jobId, completed, total, percent, latest: pj.latest_results }
+          })
+        }
         
-        if (response.ok) {
-          const results = await response.json()
+        // results
+        const r = await fetch(`/api/proxy/jobs/${jobId}/results`)
+        if (r.ok) {
+          const results = await r.json()
           if (results.status === 'completed' && results.results) {
-            setSuggestions(results.results.map((r: any) => ({
-              id: r.index,
-              original: r.original,
-              suggested_name: r.suggested,
-              error: r.status === 'error' ? r.error : null
+            setSuggestions(results.results.map((x: any) => ({
+              id: x.index,
+              original: x.original,
+              suggested_name: x.suggested,
+              error: x.status === 'error' ? x.error : null
             })))
-            setUserCredits(prev => Math.max(0, prev - files.length))
+            // decrement credits server-side
+            const { data } = await supabase.auth.getSession()
+            const token = data.session?.access_token
+            if (token) {
+              const dec = await fetch('/api/credits', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ amount: files.length })
+              }).then(r=>r.ok?r.json():null).catch(()=>null)
+              if (dec && typeof dec.credits === 'number') setUserCredits(dec.credits)
+            }
             return
           }
         }
         
-        // Wait 5 seconds before next poll
-        await new Promise(resolve => setTimeout(resolve, 5000))
+        await new Promise(res => setTimeout(res, 5000))
         attempts++
-        
       } catch (e) {
-        console.error('Polling error:', e)
         attempts++
+        await new Promise(res => setTimeout(res, 3000))
       }
     }
-    
     setError('Processing timed out. Please try again.')
   }
 
@@ -162,9 +201,22 @@ export default function Page() {
     const valid = suggestions.filter(s => s.suggested_name && !s.error)
     if (valid.length === 0) return
 
-    // Download each original image with the new suggested filename
+    const zip = new JSZip()
+    const folder = zip.folder('renamed')
+    if (!folder) return
+
+    const KNOWN_EXTS = ['jpg','jpeg','png','webp','gif','bmp','tiff','tif','heic','heif','svg']
+    const stripKnownExt = (name: string) => {
+      const trimmed = name.trim().replace(/\.+$/, '')
+      const dot = trimmed.lastIndexOf('.')
+      if (dot > 0) {
+        const ext = trimmed.slice(dot + 1).toLowerCase()
+        if (KNOWN_EXTS.includes(ext)) return trimmed.slice(0, dot)
+      }
+      return trimmed
+    }
+
     for (const s of valid) {
-      // Try to map suggestion to a file: prefer index id if available
       let file: File | undefined
       if (typeof (s as any).id === 'number' && files[(s as any).id]) {
         file = files[(s as any).id]
@@ -173,23 +225,27 @@ export default function Page() {
       }
       if (!file) continue
 
-      // Preserve original extension
-      const extFromName = file.name.includes('.') ? file.name.split('.').pop() : undefined
-      const ext = extFromName || (file.type.split('/')[1] || 'jpg')
-      const newName = `${s.suggested_name}.${ext}`
+      const arrayBuf = await file.arrayBuffer()
+      const extFromName = file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() : undefined
+      let extFromMime = file.type.split('/')[1]?.toLowerCase()
+      if (extFromMime === 'jpeg') extFromMime = 'jpg'
+      if (extFromMime === 'svg+xml') extFromMime = 'svg'
+      const ext = (extFromName || extFromMime || 'jpg').replace(/[^a-z0-9]/g, '')
+      const base = stripKnownExt(String(s.suggested_name || 'image'))
+      const newName = `${base}.${ext}`
 
-      const url = URL.createObjectURL(file)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = newName
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(url)
-
-      // Small delay to avoid some browsers blocking rapid downloads
-      await new Promise(r => setTimeout(r, 50))
+      folder.file(newName, arrayBuf)
     }
+
+    const zipBlob = await zip.generateAsync({ type: 'blob' })
+    const url = URL.createObjectURL(zipBlob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'renamed-images.zip'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
   }
 
   function buyCredits(amount: number) {
@@ -200,16 +256,43 @@ export default function Page() {
     window.open(stripeUrl, '_blank')
   }
 
+  async function signOutSupabase() {
+    await supabase.auth.signOut()
+    if (typeof window !== 'undefined') window.location.href = '/login'
+  }
+
+  function manageBilling() {
+    // Stripe customer portal for cancellations/management
+    const portal = process.env.NEXT_PUBLIC_BILLING_PORTAL_URL || 'https://billing.stripe.com/p/login/6oUdR9fyd8Sd6Cifd46oo00'
+    if (typeof window !== 'undefined') window.open(portal, '_blank')
+  }
+
   return (
     <div className="min-h-screen bg-white">
+      {!authReady ? (
+        <div className="max-w-4xl mx-auto pt-24 px-4 text-center text-sm text-gray-500">Checking authentication…</div>
+      ) : (
+      <>
       {/* Hero */}
-      <div className="max-w-4xl mx-auto pt-16 pb-10 px-4 text-center">
+      <div className="max-w-4xl mx-auto pt-16 pb-10 px-4 text-center relative">
+        <div className="absolute right-4 top-4">
+          <div className="relative">
+            <button onClick={() => setMenuOpen(v=>!v)} className="p-2 rounded-full border hover:bg-gray-50">
+              <Cog className="w-5 h-5" />
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 mt-2 w-44 bg-white border rounded-lg shadow">
+                <button onClick={manageBilling} className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50">Manage billing</button>
+                <button onClick={signOutSupabase} className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50">Sign out</button>
+              </div>
+            )}
+          </div>
+        </div>
         <div className="text-4xl md:text-5xl font-[var(--font-playfair)] leading-tight">
           File Renamer AI
         </div>
-        <p className="mt-3 text-gray-600">Rename photos with AI. Pick a folder to begin.</p>
+        <p className="mt-3 text-gray-600">Rename photos with AI. Drop in a folder to begin.</p>
       </div>
-
       {/* Controls */}
       <div className="max-w-3xl mx-auto px-4">
         {/* Quick chips */}
@@ -231,11 +314,11 @@ export default function Page() {
               Clear ({files.length})
             </button>
           )}
-          <button onClick={previewFirst} disabled={isBusy || !hasFiles} className="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 disabled:opacity-50 flex items-center gap-2">
+          <button onClick={previewFirst} disabled={isBusy || !hasFiles || files.length !== 1} className="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 disabled:opacity-50 flex items-center gap-2" title={files.length > 1 ? 'Select a single image to preview' : undefined}>
             <SlidersHorizontal className="w-4 h-4" />
             Preview First
           </button>
-          <button onClick={aiRenameAll} disabled={isBusy || !hasFiles} className="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 disabled:opacity-50 flex items-center gap-2">
+          <button onClick={() => aiRenameAll()} disabled={isBusy || !hasFiles} className="px-3 py-1.5 rounded-full border border-gray-200 hover:bg-gray-50 disabled:opacity-50 flex items-center gap-2">
             <SlidersHorizontal className="w-4 h-4" />
             Rename Files
           </button>
@@ -278,9 +361,19 @@ export default function Page() {
               <ImageIcon className="w-5 h-5"/> 
               Images {hasFiles ? `(${files.length})` : ''}
             </div>
-            {isBusy && <div className="text-sm text-gray-500">Loading…</div>}
+            {isBusy && (
+              <div className="text-sm text-gray-500 flex items-center gap-3">
+                {currentJobId ? (
+                  <>
+                    <div className="w-40 bg-gray-100 rounded-full h-2 overflow-hidden">
+                      <div className="bg-blue-500 h-2" style={{ width: `${progress.percent}%` }} />
+                    </div>
+                    <span>{progress.completed}/{progress.total}</span>
+                  </>
+                ) : 'Loading…'}
+              </div>
+            )}
           </div>
-          
           {hasFiles ? (
             <div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -329,6 +422,8 @@ export default function Page() {
           )}
         </div>
       </div>
+      </>
+      )}
     </div>
   )
 }
