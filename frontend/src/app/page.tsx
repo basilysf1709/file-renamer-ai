@@ -26,6 +26,19 @@ export default function Page() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const MAX_FILES = 10
 
+  function normalizeModelError(message: any): string | null {
+    const msg = String(message || '').toLowerCase()
+    if (!msg) return null
+    if (
+      msg.includes('too small') ||
+      msg.includes('must be larger than factor') ||
+      msg.includes('mat1 and mat2 shapes cannot be multiplied') ||
+      msg.includes('height:') && msg.includes('width:') && msg.includes('must be larger')
+    ) {
+      return 'Image is too small. Please use images with a larger minimum side.'
+    }
+    return message || null
+  }
 
   useEffect(() => {
     // allow directory selection on browsers that support it
@@ -262,7 +275,7 @@ export default function Page() {
               id: x.index,
               original: x.original,
               suggested_name: x.suggested,
-              error: x.status === 'error' ? x.error : null
+              error: x.status === 'error' ? normalizeModelError(x.error) : null
             })))
             // decrement credits server-side
             const { data } = await supabase.auth.getSession()
