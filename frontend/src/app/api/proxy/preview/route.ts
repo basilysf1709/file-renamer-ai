@@ -26,7 +26,9 @@ async function upscaleFileIfNeeded(file: File): Promise<File> {
       img = img.extend({ top: 0, left: 0, right: padRight, bottom: padBottom, background: { r: 255, g: 255, b: 255, alpha: 1 } })
     }
     const out = await img.toBuffer()
-    return new File([out], file.name, { type: file.type })
+    const u8 = new Uint8Array(out)
+    const blob = new Blob([u8], { type: file.type })
+    return new File([blob], file.name, { type: file.type })
   } catch {
     return file
   }
