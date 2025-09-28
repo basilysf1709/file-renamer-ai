@@ -24,6 +24,7 @@ export default function Page() {
   const [authReady, setAuthReady] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const MAX_FILES = 10
 
 
   useEffect(() => {
@@ -57,13 +58,15 @@ export default function Page() {
     const selectedFiles = Array.from(event.target.files || [])
     const imageFiles = selectedFiles.filter(file => file.type.startsWith('image/'))
     
-    if (imageFiles.length !== selectedFiles.length) {
-      setError('Only image files are supported')
+    let list = imageFiles
+    if (imageFiles.length > MAX_FILES) {
+      list = imageFiles.slice(0, MAX_FILES)
+      setError(`You can upload up to ${MAX_FILES} images at a time. Using the first ${MAX_FILES}.`)
     } else {
       setError(null)
     }
     
-    setFiles(imageFiles)
+    setFiles(list)
     setSuggestions([]) // Clear previous results
   }
 
@@ -128,6 +131,7 @@ export default function Page() {
             const f = it.getAsFile()
             if (f && f.type.startsWith('image/')) collected.push(f)
           }
+          if (collected.length >= MAX_FILES) break
         }
       } else {
         // Fallback: plain files (no recursion)
@@ -138,7 +142,12 @@ export default function Page() {
         setError('No images found in the dropped folder')
         return
       }
-      setError(null)
+      if (collected.length > MAX_FILES) {
+        collected = collected.slice(0, MAX_FILES)
+        setError(`You can upload up to ${MAX_FILES} images at a time. Using the first ${MAX_FILES}.`)
+      } else {
+        setError(null)
+      }
       setFiles(collected)
       setSuggestions([])
     } catch (err: any) {
@@ -173,8 +182,31 @@ export default function Page() {
       const formData = new FormData()
       files.forEach(file => formData.append('files', file))
       formData.append('prompt', userPrompt)
-      const jobResponse = await fetch(`/api/proxy/jobs/rename`, { method: 'POST', body: formData })
-      if (!jobResponse.ok) throw new Error(`Failed to create job: ${jobResponse.status}`)
+      const { data } = await supabase.auth.getSession()
+      const token = data.session?.access_token
+      if (!token) {
+        setError('Please sign in to continue')
+        setIsBusy(false)
+        return
+      }
+      const jobResponse = await fetch(`/api/proxy/jobs/rename`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData
+      })
+      if (!jobResponse.ok) {
+        if (jobResponse.status === 402) {
+          setError('Please add credits to continue')
+          setIsBusy(false)
+          return
+        }
+        if (jobResponse.status === 401) {
+          setError('Please sign in to continue')
+          setIsBusy(false)
+          return
+        }
+        throw new Error(`Request failed: ${jobResponse.status}`)
+      }
       const jobData = await jobResponse.json()
       const jobId = jobData.job_id
       setCurrentJobId(jobId)
@@ -401,7 +433,7 @@ export default function Page() {
       {/* Preview */}
       <div className="max-w-5xl mx-auto px-4 mt-10 pb-16">
         <div 
-          className={`bg-white border-2 border-dashed rounded-2xl p-6 transition-colors ${
+          className={`bg-white border-2 border-dashed rounded-2xl p-6 transition-colors relative ${
             isDragOver ? 'border-blue-400 bg-blue-50' : 'border-gray-200'
           }`}
           onDragOver={handleDragOver}
@@ -449,7 +481,7 @@ export default function Page() {
             <div className="text-center py-12">
               <Upload className="w-12 h-12 text-gray-400 mx-auto mb-4" />
               <div className="text-sm text-gray-500">
-                {isBusy ? 'Processing images…' : 'Drop image files here or click "Select Images" to upload.'}
+                {isBusy ? 'Processing images…' : 'Drop images (jpg, jpeg, png, webp, gif, bmp, tiff, heic, heif, svg) here or click "Select Images". Folders supported.'}
               </div>
             </div>
           )}

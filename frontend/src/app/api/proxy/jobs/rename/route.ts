@@ -2,6 +2,12 @@ import { NextRequest } from 'next/server'
 
 export const runtime = 'nodejs'
 
+function getToken(req: NextRequest) {
+  const h = req.headers.get('authorization') || ''
+  const [, token] = h.split(' ')
+  return token || ''
+}
+
 export async function POST(req: NextRequest) {
   try {
     const backendBase = process.env.RENAMER_API_BASE
@@ -11,8 +17,26 @@ export async function POST(req: NextRequest) {
       return new Response(JSON.stringify({ error: 'Server not configured' }), { status: 500 })
     }
 
-    const formData = await req.formData()
+    const token = getToken(req)
+    if (!token) return new Response(JSON.stringify({ error: 'missing_token' }), { status: 401 })
 
+    // read files count from incoming form data
+    const formData = await req.formData()
+    const filesCount = Array.from(formData.getAll('files')).length
+
+    // check credits first
+    const creditsRes = await fetch(new URL('/api/credits', req.url), {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    if (!creditsRes.ok) {
+      return new Response(JSON.stringify({ error: 'credits_check_failed' }), { status: 500 })
+    }
+    const { credits } = await creditsRes.json()
+    if (typeof credits === 'number' && credits < filesCount) {
+      return new Response(JSON.stringify({ error: 'insufficient_credits', need: filesCount, has: credits }), { status: 402 })
+    }
+
+    // forward to backend
     const upstream = await fetch(`${backendBase}/v1/jobs/rename`, {
       method: 'POST',
       headers: {
