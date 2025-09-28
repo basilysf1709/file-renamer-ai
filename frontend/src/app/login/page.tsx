@@ -39,7 +39,7 @@ export default function LoginPage() {
   async function signUpEmail() {
     setLoading(true); setMessage(null); setError(null)
     try {
-      const redirectTo = typeof window !== 'undefined' ? `${window.location.origin}/login` : undefined
+      const redirectTo = typeof window !== 'undefined' ? `${window.location.origin}` : undefined
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
