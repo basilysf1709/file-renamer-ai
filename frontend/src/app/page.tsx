@@ -139,6 +139,13 @@ export default function Page() {
           }
           if (collected.length >= MAX_FILES) break
         }
+        // Also include plain files to handle multi-file drops where entries may miss some
+        const basicFiles = Array.from(dt.files || []).filter(f => f.type.startsWith('image/'))
+        const seen = new Set(collected.map(f => `${f.name}:${f.size}:${(f as any).lastModified || 0}`))
+        for (const f of basicFiles) {
+          const key = `${f.name}:${f.size}:${(f as any).lastModified || 0}`
+          if (!seen.has(key)) collected.push(f)
+        }
       } else {
         // Fallback: plain files (no recursion)
         const droppedFiles = Array.from(dt.files || [])
