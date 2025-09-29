@@ -6,7 +6,7 @@ export default function Privacy() {
         
         <div className="prose">
           <p>
-            This Privacy Policy describes how File Renamer AI ("the Service", "we", "us") collects, uses,
+            This Privacy Policy describes how File Renamer AI (&quot;the Service&quot;, &quot;we&quot;, &quot;us&quot;) collects, uses,
             and protects information when you access our website and application at filerenamerai.com.
           </p>
 
