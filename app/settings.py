@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     api_port: int = 80
     
     # Security
-    api_key: str = "sk-renamer-202509-vK8mF2nP7wQxR9jL5tE3uA6sN1dG4hB8cV0zX2yM9pI7oU5qW3eR6tY8uI1oP4sA"
+    api_key: str = "sk-demo-key"
     
     # Cost-optimized quantization settings (50% cost reduction, 20% speed boost)
     quantization: str = "8bit"  # Faster than 4-bit, better quality

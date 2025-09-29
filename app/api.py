@@ -33,7 +33,7 @@ security = HTTPBearer()
 def verify_api_key(credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Verify API key from Authorization header"""
     api_key = credentials.credentials
-    valid_api_key = settings.api_key if hasattr(settings, 'api_key') else "sk-renamer-202509-vK8mF2nP7wQxR9jL5tE3uA6sN1dG4hB8cV0zX2yM9pI7oU5qW3eR6tY8uI1oP4sA"
+    valid_api_key = settings.api_key if hasattr(settings, 'api_key') else "sk-demo-key"
     
     if api_key != valid_api_key:
         raise HTTPException(status_code=401, detail="Invalid API key")
