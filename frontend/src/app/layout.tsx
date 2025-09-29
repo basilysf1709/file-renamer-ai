@@ -3,6 +3,7 @@ import './globals.css'
 import { Inter, Playfair_Display } from 'next/font/google'
 import Footer from '@/app/src/components/Footer'
 import type { Metadata } from 'next'
+import { Analytics } from '@vercel/analytics/react'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
 const playfair = Playfair_Display({ subsets: ['latin'], variable: '--font-playfair' })
@@ -22,6 +23,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-screen bg-white text-gray-900 antialiased flex flex-col">
         {children}
         <Footer />
+        <Analytics />
       </body>
     </html>
   )
