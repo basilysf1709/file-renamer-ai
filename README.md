@@ -1,10 +1,8 @@
 # Renamer AI - Intelligent Image Renaming with VLM
 
-Hi! A production-ready backend that accepts batch rename jobs, queues work on SQS, and runs a GPU worker that generates strict
+Hi! A production-ready backend that accepts batch rename jobs, queues work on SQS, and runs a GPU worker that generates strict, semantic filenames from images using Qwen2-VL-2B vision language model.
 
 https://github.com/user-attachments/assets/6a73923e-7268-4df4-a467-0ab01995fc47
-
-, semantic filenames from images using Qwen2-VL-2B vision language model. OPEN SOURCE!!!
 
 ## Architecture Overview
 
